@@ -418,34 +418,66 @@
         const networkSelect = document.getElementById('network');
         const serviceSelect = document.getElementById('service');
         const services = @json($services);
-        const currentNetwork = '{{ $formula['network'] }}';
-        const currentService = '{{ $formula['service'] }}';
+        const currentNetwork = '{{ $formula['network'] ?? '' }}';
+        const currentService = '{{ $formula['service'] ?? '' }}';
 
-        // Populate services when page loads
+        // Populate services when page loads or network changes
         function populateServices() {
             const selectedNetwork = networkSelect.value || currentNetwork;
             serviceSelect.innerHTML = '<option value="">Select Service</option>';
             
             if (selectedNetwork) {
-                const filteredServices = services.filter(service => service.network === selectedNetwork);
-                filteredServices.forEach(service => {
-                    const option = document.createElement('option');
-                    option.value = service.name;
-                    option.textContent = service.name;
-                    if (service.name === currentService && selectedNetwork === currentNetwork) {
-                        option.selected = true;
-                    }
-                    serviceSelect.appendChild(option);
+                // Filter services by network and active status
+                const filteredServices = services.filter(service => {
+                    const serviceNetwork = (service.network || '').trim();
+                    const networkMatch = serviceNetwork === selectedNetwork.trim();
+                    const isActive = (service.status || '').toLowerCase() === 'active';
+                    return networkMatch && isActive;
                 });
+                
+                if (filteredServices.length > 0) {
+                    filteredServices.forEach(service => {
+                        const option = document.createElement('option');
+                        option.value = service.name || '';
+                        option.textContent = service.name || '';
+                        
+                        // Select current service if it matches
+                        if (service.name === currentService && (selectedNetwork === currentNetwork || !currentNetwork)) {
+                            option.selected = true;
+                        }
+                        
+                        serviceSelect.appendChild(option);
+                    });
+                } else {
+                    // No services found for this network
+                    const noServiceOption = document.createElement('option');
+                    noServiceOption.value = '';
+                    noServiceOption.textContent = 'No services available for this network';
+                    noServiceOption.disabled = true;
+                    serviceSelect.appendChild(noServiceOption);
+                }
+            } else {
+                // No network selected
+                const noNetworkOption = document.createElement('option');
+                noNetworkOption.value = '';
+                noNetworkOption.textContent = 'Select Network First';
+                noNetworkOption.disabled = true;
+                serviceSelect.appendChild(noNetworkOption);
             }
         }
 
-        // Initial population
-        populateServices();
+        // Initial population on page load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', populateServices);
+        } else {
+            populateServices();
+        }
 
         // Update services when network changes
         networkSelect.addEventListener('change', function() {
             populateServices();
+            // Reset service selection when network changes
+            serviceSelect.value = '';
         });
 
         // Status toggle
@@ -473,8 +505,14 @@
                 
                 // Ensure status checkbox is properly handled
                 const statusCheckbox = form.querySelector('input[name="status"]');
-                if (statusCheckbox && !statusCheckbox.checked) {
-                    formData.delete('status');
+                if (statusCheckbox) {
+                    if (statusCheckbox.checked) {
+                        // Explicitly set status to "on" when checked
+                        formData.set('status', 'on');
+                    } else {
+                        // Remove status when unchecked (will default to Inactive)
+                        formData.delete('status');
+                    }
                 }
                 
                 const response = await fetch(form.action, {
@@ -496,14 +534,30 @@
                 } catch (parseError) {
                     // If parsing fails, check status code
                     console.error('Failed to parse JSON response:', parseError);
-                    console.error('Response text:', responseText.substring(0, 200));
+                    console.error('Response text:', responseText.substring(0, 500));
                     console.error('Response status:', response.status);
                     
-                    // If status is 422, it's likely a validation error
+                    // Handle different response types
                     if (response.status === 422) {
-                        alert('Validation failed. Please check all required fields are filled correctly.');
+                        // Validation error - try to extract error messages
+                        try {
+                            const errorData = JSON.parse(responseText);
+                            if (errorData.errors) {
+                                const errorList = Object.values(errorData.errors).flat().join('\n');
+                                alert('Validation failed:\n\n' + errorList);
+                            } else {
+                                alert('Validation failed. Please check all required fields are filled correctly.');
+                            }
+                        } catch (e) {
+                            alert('Validation failed. Please check all required fields are filled correctly.');
+                        }
+                    } else if (response.status === 200 || response.status === 201) {
+                        // Success but not JSON - might be a redirect HTML
+                        window.location.href = '{{ route("admin.formulas.all") }}';
+                        return;
                     } else {
-                        alert('Server returned an unexpected response. Please try again.');
+                        // Other error
+                        alert('Server returned an unexpected response. Status: ' + response.status + '\n\nPlease try again.');
                     }
                     submitButton.disabled = false;
                     buttonText.textContent = originalText;

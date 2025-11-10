@@ -161,110 +161,6 @@
         .loading-spinner.show {
             display: inline-block;
         }
-        .matching-charges-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .matching-charges-table thead {
-            background: linear-gradient(135deg, #FF750F 0%, #ff8c3a 100%);
-            color: white;
-        }
-        .matching-charges-table th {
-            padding: 12px;
-            text-align: left;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .matching-charges-table td {
-            padding: 12px;
-            font-size: 13px;
-            border-bottom: 1px solid #e5e7eb;
-        }
-        .matching-charges-table tbody tr:hover {
-            background-color: #fff5ed;
-        }
-        .matching-charges-table tbody tr:last-child td {
-            border-bottom: none;
-        }
-        .network-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 11px;
-            font-weight: 600;
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            color: white;
-        }
-        .service-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 11px;
-            font-weight: 600;
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-        }
-        .rate-price {
-            font-weight: 700;
-            color: #FF750F;
-            font-size: 14px;
-        }
-        .no-charges-message {
-            padding: 24px;
-            text-align: center;
-            color: #6b7280;
-            font-size: 13px;
-            background: #f9fafb;
-            border-radius: 10px;
-            border: 1px dashed #d1d5db;
-        }
-        .formula-item {
-            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-            border: 1px solid #f59e0b;
-            border-radius: 10px;
-            padding: 16px;
-            margin-bottom: 12px;
-        }
-        .formula-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        .formula-name {
-            font-weight: 700;
-            color: #92400e;
-            font-size: 14px;
-        }
-        .formula-priority {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 11px;
-            font-weight: 700;
-            background: #fbbf24;
-            color: #78350f;
-        }
-        .formula-details {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 8px;
-            font-size: 12px;
-            color: #78350f;
-            margin-top: 8px;
-        }
-        .formula-charge {
-            font-weight: 700;
-            color: #FF750F;
-            font-size: 16px;
-            text-align: right;
-        }
     </style>
 
     <!-- Page Header -->
@@ -432,38 +328,12 @@
                             </svg>
                         </div>
                         <p class="text-sm text-gray-600 font-medium mb-2">Estimated Shipping Rate</p>
-                        <div class="rate-amount" id="rateAmount">{{ currency(0) }}</div>
+                        <div class="rate-amount" id="rateAmount">$0.00</div>
                     </div>
 
                     <div class="mt-6">
                         <h3 class="text-lg font-bold text-gray-900 mb-4">Rate Breakdown</h3>
                         <div id="rateBreakdown">
-                            <!-- Will be populated by JavaScript -->
-                        </div>
-                    </div>
-
-                    <!-- Applied Formulas Section -->
-                    <div class="mt-6 pt-6 border-t border-gray-200">
-                        <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                            <svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
-                            </svg>
-                            Applied Weight Charges (From Formulas)
-                        </h3>
-                        <div id="appliedFormulasContainer">
-                            <!-- Will be populated by JavaScript -->
-                        </div>
-                    </div>
-
-                    <!-- Matching Shipping Charges Section -->
-                    <div class="mt-6 pt-6 border-t border-gray-200">
-                        <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                            <svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
-                            </svg>
-                            Available Networks & Services
-                        </h3>
-                        <div id="matchingChargesContainer">
                             <!-- Will be populated by JavaScript -->
                         </div>
                     </div>
@@ -514,7 +384,7 @@
                         </div>
                         <div>
                             <h4 class="font-bold text-gray-900 text-sm mb-1">Calculate</h4>
-                            <p class="text-xs text-gray-600">Click calculate to get instant rate estimation</p>
+                            <p class="text-xs text-gray-600">Click calculate to get instant rate estimation with automatic network/service matching</p>
                         </div>
                     </div>
                 </div>
@@ -524,11 +394,11 @@
                     <div class="space-y-2 text-xs text-gray-600">
                         <div class="flex items-center gap-2">
                             <div class="w-1.5 h-1.5 rounded-full bg-purple-600"></div>
-                            <span>Shipment type affects base rate</span>
+                            <span>Base price from shipping charges (destination pincode, network, service)</span>
                         </div>
                         <div class="flex items-center gap-2">
                             <div class="w-1.5 h-1.5 rounded-full bg-purple-600"></div>
-                            <span>Weight determines additional charges</span>
+                            <span>Weight price from formulas (network, service)</span>
                         </div>
                         <div class="flex items-center gap-2">
                             <div class="w-1.5 h-1.5 rounded-full bg-purple-600"></div>
@@ -605,215 +475,197 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Currency formatting function
-                    const currencySymbol = '{{ currency_symbol() }}';
-                    const formatCurrency = (amount) => {
-                        return currencySymbol + parseFloat(amount).toFixed(2);
-                    };
-                    
-                    // Update rate amount
-                    document.getElementById('rateAmount').textContent = formatCurrency(data.rate);
-                    
-                    // Update breakdown
-                    const breakdownHtml = `
-                        <div class="breakdown-item">
-                            <div class="flex justify-between items-center">
-                                <span class="text-sm font-medium text-gray-700">Base Rate</span>
-                                <span class="text-sm font-bold text-gray-900">${formatCurrency(data.breakdown.base_rate)}</span>
-                            </div>
-                        </div>
-                        <div class="breakdown-item">
-                            <div class="flex justify-between items-center">
-                                <span class="text-sm font-medium text-gray-700">Weight Charge ${data.applied_formulas && data.applied_formulas.length > 0 ? '(From Formulas)' : ''}</span>
-                                <span class="text-sm font-bold text-gray-900">${formatCurrency(data.breakdown.weight_charge)}</span>
-                            </div>
-                            ${data.applied_formulas && data.applied_formulas.length > 0 ? `
-                                <div class="mt-2 text-xs text-gray-600">
-                                    <span class="font-semibold">Applied ${data.applied_formulas.length} formula(s)</span>
-                                </div>
-                            ` : ''}
-                        </div>
-                        <div class="breakdown-item">
-                            <div class="flex justify-between items-center">
-                                <span class="text-sm font-medium text-gray-700">Distance Charge</span>
-                                <span class="text-sm font-bold text-gray-900">${formatCurrency(data.breakdown.distance_charge)}</span>
-                            </div>
-                        </div>
-                        <div class="breakdown-item bg-purple-50 border-purple-200">
-                            <div class="flex justify-between items-center">
-                                <span class="text-sm font-bold text-purple-700">Service Type</span>
-                                <span class="text-sm font-bold text-purple-900">${data.breakdown.service_type}</span>
-                            </div>
-                        </div>
-                    `;
-                    document.getElementById('rateBreakdown').innerHTML = breakdownHtml;
-                    
-            // Display applied formulas
-            const appliedFormulasContainer = document.getElementById('appliedFormulasContainer');
-            if (data.applied_formulas && data.applied_formulas.length > 0) {
-                let formulasHtml = '<div class="space-y-3">';
-                
-                // Group by network only (since formulas are matched by network)
-                const groupedFormulas = {};
-                data.applied_formulas.forEach(formula => {
-                    const network = formula.network || 'Unknown';
-                    if (!groupedFormulas[network]) {
-                        groupedFormulas[network] = {
-                            network: network,
-                            formulas: [],
-                            totalCharge: 0
-                        };
+                    // Update rate amount - use selected option's total if available, otherwise use main rate
+                    let displayRate = data.rate;
+                    if (data.all_network_service_options && data.all_network_service_options.length > 0) {
+                        const selectedOption = data.all_network_service_options.find(function(opt) {
+                            return opt.is_selected;
+                        });
+                        if (selectedOption) {
+                            displayRate = selectedOption.total_rate;
+                        }
                     }
-                    groupedFormulas[network].formulas.push(formula);
-                    groupedFormulas[network].totalCharge += parseFloat(formula.calculated_charge) || 0;
-                });
-                
-                // Display each network group
-                Object.values(groupedFormulas).forEach(group => {
-                    formulasHtml += `
-                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <div class="flex items-center gap-2">
-                                    <span class="network-badge">${group.network}</span>
-                                    <span class="text-sm text-gray-600">(${group.formulas.length} formula${group.formulas.length > 1 ? 's' : ''})</span>
-                                </div>
-                                <div class="text-sm font-bold text-blue-700">
-                                    Total: ${formatCurrency(group.totalCharge)}
-                                </div>
-                            </div>
-                            <div class="space-y-2">
-                    `;
+                    document.getElementById('rateAmount').textContent = '₹' + displayRate.toFixed(2);
+                    
+                    // Build breakdown HTML
+                    let breakdownHtml = '';
+                    
+                    // Base Rate with Network/Service info
+                    breakdownHtml += '<div class="breakdown-item bg-blue-50 border-blue-200">';
+                    breakdownHtml += '<div class="flex justify-between items-center mb-2">';
+                    breakdownHtml += '<span class="text-sm font-medium text-gray-700">Base Rate</span>';
+                    breakdownHtml += '<span class="text-sm font-bold text-gray-900">₹' + data.breakdown.base_rate.toFixed(2) + '</span>';
+                    breakdownHtml += '</div>';
+                    breakdownHtml += '<div class="text-xs text-gray-600 mt-1 pt-2 border-t border-blue-200">';
+                    breakdownHtml += '<div class="flex items-center gap-2 mb-1">';
+                    breakdownHtml += '<span class="font-semibold">Network:</span>';
+                    breakdownHtml += '<span>' + (data.base_price_info.network || 'N/A') + '</span>';
+                    breakdownHtml += '</div>';
+                    breakdownHtml += '<div class="flex items-center gap-2 mb-1">';
+                    breakdownHtml += '<span class="font-semibold">Service:</span>';
+                    breakdownHtml += '<span>' + (data.base_price_info.service || 'N/A') + '</span>';
+                    breakdownHtml += '</div>';
+                    breakdownHtml += '<div class="flex items-center gap-2 mb-1">';
+                    breakdownHtml += '<span class="font-semibold">Destination Zone:</span>';
+                    breakdownHtml += '<span>' + (data.base_price_info.destination_zone || 'N/A') + '</span>';
+                    breakdownHtml += '</div>';
+                    breakdownHtml += '<div class="flex items-center gap-2 mb-1">';
+                    breakdownHtml += '<span class="font-semibold">Transit Time:</span>';
+                    breakdownHtml += '<span>' + (data.base_price_info.transit_time || 'N/A') + '</span>';
+                    breakdownHtml += '</div>';
+                    breakdownHtml += '<div class="flex items-center gap-2 mb-2">';
+                    breakdownHtml += '<span class="font-semibold">Items Allowed:</span>';
+                    breakdownHtml += '<span>' + (data.base_price_info.items_allowed || 'N/A') + '</span>';
+                    breakdownHtml += '</div>';
+                    
+                    // Show all available network/service options if multiple exist
+                    if (data.all_network_service_options && data.all_network_service_options.length > 1) {
+                        breakdownHtml += '<div class="mt-2 pt-2 border-t border-blue-300">';
+                        breakdownHtml += '<div class="font-semibold mb-2 text-blue-700">All Available Options:</div>';
+                        data.all_network_service_options.forEach(function(option) {
+                            const isSelected = option.is_selected;
+                            breakdownHtml += '<div class="mb-3 p-2 rounded ' + (isSelected ? 'bg-blue-100 border border-blue-300' : 'bg-gray-50 border border-gray-200') + '">';
+                            breakdownHtml += '<div class="flex items-center justify-between mb-1">';
+                            breakdownHtml += '<span class="text-xs font-semibold ' + (isSelected ? 'text-blue-800' : 'text-gray-700') + '">';
+                            breakdownHtml += option.network + ' - ' + option.service;
+                            if (isSelected) {
+                                breakdownHtml += ' <span class="text-green-600">[Selected - Best Rate]</span>';
+                            }
+                            breakdownHtml += '</span>';
+                            breakdownHtml += '<span class="text-xs font-bold ' + (isSelected ? 'text-blue-900' : 'text-gray-800') + '">Total: ₹' + option.total_rate.toFixed(2) + '</span>';
+                            breakdownHtml += '</div>';
                             
-                            group.formulas.forEach(formula => {
-                                // Get weight from response breakdown or form
-                                const weight = data.breakdown.weight || parseFloat(document.getElementById('weight').value) || 0;
-                                let calculationDesc = '';
-                                
-                                if (formula.scope === 'per kg') {
-                                    if (formula.type === 'Fixed') {
-                                        calculationDesc = `${formatCurrency(formula.value)} × ${weight} kg = ${formatCurrency(formula.calculated_charge)}`;
-                                    } else {
-                                        const percentageAmount = (data.breakdown.base_rate * formula.value / 100);
-                                        calculationDesc = `${formatCurrency(percentageAmount)} (${formula.value}% of ${formatCurrency(data.breakdown.base_rate)}) × ${weight} kg = ${formatCurrency(formula.calculated_charge)}`;
-                                    }
-                                } else {
-                                    if (formula.type === 'Fixed') {
-                                        calculationDesc = `Flat ${formatCurrency(formula.value)} = ${formatCurrency(formula.calculated_charge)}`;
-                                    } else {
-                                        calculationDesc = `${formula.value}% of ${formatCurrency(data.breakdown.base_rate)} = ${formatCurrency(formula.calculated_charge)}`;
-                                    }
+                            // Show breakdown for this option
+                            breakdownHtml += '<div class="text-xs text-gray-600 ml-2 mt-1">';
+                            breakdownHtml += '<div>Base: ₹' + option.base_rate.toFixed(2) + '</div>';
+                            breakdownHtml += '<div>Weight: ₹' + option.weight_charge.toFixed(2);
+                            if (option.formulas && option.formulas.length > 0) {
+                                breakdownHtml += ' (';
+                                option.formulas.forEach(function(formula, idx) {
+                                    if (idx > 0) breakdownHtml += ', ';
+                                    breakdownHtml += formula.name;
+                                });
+                                breakdownHtml += ')';
+                            }
+                            breakdownHtml += '</div>';
+                            breakdownHtml += '<div>Distance: ₹' + option.distance_charge.toFixed(2) + '</div>';
+                            breakdownHtml += '</div>';
+                            
+                            // Show transit time and items allowed for this option
+                            if (option.transit_time || option.items_allowed) {
+                                breakdownHtml += '<div class="text-xs text-gray-600 ml-2 mt-2 pt-2 border-t border-gray-300">';
+                                if (option.transit_time && option.transit_time !== 'N/A') {
+                                    breakdownHtml += '<div class="mb-1">';
+                                    breakdownHtml += '<span class="font-semibold">Transit Time:</span> ';
+                                    breakdownHtml += '<span>' + option.transit_time + '</span>';
+                                    breakdownHtml += '</div>';
                                 }
-                                
-                                formulasHtml += `
-                                    <div class="formula-item">
-                                        <div class="formula-header">
-                                            <div class="flex items-center gap-2">
-                                                <span class="formula-name">${formula.formula_name}</span>
-                                                ${formula.service && formula.service !== 'N/A' ? `<span class="service-badge">${formula.service}</span>` : ''}
-                                            </div>
-                                            <span class="formula-priority">${formula.priority} Priority</span>
-                                        </div>
-                                        <div class="formula-details">
-                                            <div>
-                                                <span class="font-semibold">Type:</span> ${formula.type}
-                                            </div>
-                                            <div>
-                                                <span class="font-semibold">Scope:</span> ${formula.scope}
-                                            </div>
-                                            <div>
-                                                <span class="font-semibold">Value:</span> ${formula.value}${formula.type === 'Percentage' ? '%' : ''}
-                                            </div>
-                                            <div class="formula-charge">
-                                                Charge: ${formatCurrency(formula.calculated_charge)}
-                                            </div>
-                                        </div>
-                                        <div class="mt-2 text-xs text-gray-600 italic">
-                                            Calculation: ${calculationDesc}
-                                        </div>
-                                        ${formula.remark ? `<div class="mt-1 text-xs text-gray-500">${formula.remark}</div>` : ''}
-                                    </div>
-                                `;
-                            });
+                                if (option.items_allowed && option.items_allowed !== 'N/A') {
+                                    breakdownHtml += '<div>';
+                                    breakdownHtml += '<span class="font-semibold">Items Allowed:</span> ';
+                                    breakdownHtml += '<span>' + option.items_allowed + '</span>';
+                                    breakdownHtml += '</div>';
+                                }
+                                breakdownHtml += '</div>';
+                            }
                             
-                            formulasHtml += `
-                                    </div>
-                                </div>
-                            `;
+                            if (option.count > 1) {
+                                breakdownHtml += '<div class="text-xs text-gray-500 mt-1 ml-2">(' + option.count + ' charges with this network/service)</div>';
+                            }
+                            breakdownHtml += '</div>';
                         });
-                        
-                        formulasHtml += '</div>';
-                        appliedFormulasContainer.innerHTML = formulasHtml;
-                    } else {
-                        appliedFormulasContainer.innerHTML = `
-                            <div class="no-charges-message">
-                                <svg class="w-8 h-8 mx-auto mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
-                                </svg>
-                                <p>No formulas applied for weight charges.</p>
-                                <p class="text-xs mt-1">Weight charges are calculated using default formula.</p>
-                            </div>
-                        `;
+                        breakdownHtml += '</div>';
+                    } else if (data.all_matching_charges && data.all_matching_charges.length > 1) {
+                        breakdownHtml += '<div class="mt-2 pt-2 border-t border-blue-300">';
+                        breakdownHtml += '<div class="text-gray-500 text-xs">';
+                        breakdownHtml += 'Note: ' + data.all_matching_charges.length + ' charges found with same network/service. Using best rate (₹' + data.breakdown.base_rate.toFixed(2) + ').';
+                        breakdownHtml += '</div>';
+                        breakdownHtml += '</div>';
                     }
                     
-                    // Display matching shipping charges
-                    const matchingChargesContainer = document.getElementById('matchingChargesContainer');
-                    if (data.matching_charges && data.matching_charges.length > 0) {
-                        let chargesHtml = `
-                            <div class="overflow-x-auto">
-                                <table class="matching-charges-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Network</th>
-                                            <th>Service</th>
-                                            <th>Base Price</th>
-                                            <th>Weight Range</th>
-                                            <th>Remarks</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                        `;
+                    breakdownHtml += '</div>';
+                    breakdownHtml += '</div>';
+                    
+                    // Weight Charge with Formula info
+                    breakdownHtml += '<div class="breakdown-item bg-green-50 border-green-200">';
+                    breakdownHtml += '<div class="flex justify-between items-center mb-2">';
+                    breakdownHtml += '<span class="text-sm font-medium text-gray-700">Weight Charge</span>';
+                    breakdownHtml += '<span class="text-sm font-bold text-gray-900">₹' + data.breakdown.weight_charge.toFixed(2) + '</span>';
+                    breakdownHtml += '</div>';
+                    
+                    if (data.applied_formulas && data.applied_formulas.length > 0) {
+                        breakdownHtml += '<div class="text-xs text-gray-600 mt-1 pt-2 border-t border-green-200">';
+                        breakdownHtml += '<div class="font-semibold mb-2">Applied Formulas (Network: ' + (data.base_price_info.network || 'N/A') + ', Service: ' + (data.base_price_info.service || 'N/A') + '):</div>';
                         
-                        data.matching_charges.forEach(charge => {
-                            chargesHtml += `
-                                <tr>
-                                    <td>
-                                        <span class="network-badge">${charge.network || 'N/A'}</span>
-                                    </td>
-                                    <td>
-                                        <span class="service-badge">${charge.service || 'N/A'}</span>
-                                    </td>
-                                    <td>
-                                        <span class="rate-price">${formatCurrency(charge.rate || 0)}</span>
-                                    </td>
-                                    <td>
-                                        <span class="text-xs text-gray-600">
-                                            ${charge.min_weight || 0} - ${charge.max_weight || 0} kg
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span class="text-xs text-gray-600">${charge.remark || '-'}</span>
-                                    </td>
-                                </tr>
-                            `;
+                        data.applied_formulas.forEach(function(formula, index) {
+                            const formulaName = formula.name || formula.formula_name || ('Formula ' + (index + 1));
+                            const formulaType = formula.type || 'Fixed';
+                            const formulaScope = formula.scope || 'Flat';
+                            const formulaValue = formula.value || 0;
+                            const calculatedCharge = formula.calculated_charge || 0;
+                            const hasBorder = index < data.applied_formulas.length - 1;
+                            
+                            breakdownHtml += '<div class="mb-2 pb-2' + (hasBorder ? ' border-b border-green-200' : '') + '">';
+                            breakdownHtml += '<div class="flex justify-between items-center mb-1">';
+                            breakdownHtml += '<span class="font-medium">' + formulaName + '</span>';
+                            breakdownHtml += '<span class="font-bold">₹' + calculatedCharge.toFixed(2) + '</span>';
+                            breakdownHtml += '</div>';
+                            breakdownHtml += '<div class="text-gray-500 text-xs">';
+                            
+                            let formulaDesc = formulaType;
+                            if (formulaScope === 'per kg') {
+                                formulaDesc += ' - ' + formulaValue + (formulaType === 'Percentage' ? '%' : '') + ' per kg';
+                            } else if (formulaType === 'Percentage') {
+                                formulaDesc += ' - ' + formulaValue + '%';
+                            } else {
+                                formulaDesc += ' - ₹' + formulaValue;
+                            }
+                            
+                            if (formula.priority) {
+                                formulaDesc += ' (' + formula.priority + ' priority)';
+                            }
+                            
+                            // Show network/service if different from base or if it's a general formula
+                            if (formula.network && formula.service) {
+                                if (formula.network !== data.base_price_info.network || formula.service !== data.base_price_info.service) {
+                                    formulaDesc += ' | Network: ' + formula.network + ', Service: ' + formula.service;
+                                }
+                            } else if (!formula.network && !formula.service) {
+                                formulaDesc += ' | General formula (applies to all)';
+                            }
+                            
+                            breakdownHtml += formulaDesc;
+                            breakdownHtml += '</div>';
+                            breakdownHtml += '</div>';
                         });
                         
-                        chargesHtml += `
-                                    </tbody>
-                                </table>
-                            </div>
-                        `;
-                        matchingChargesContainer.innerHTML = chargesHtml;
+                        breakdownHtml += '</div>';
                     } else {
-                        matchingChargesContainer.innerHTML = `
-                            <div class="no-charges-message">
-                                <svg class="w-8 h-8 mx-auto mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
-                                </svg>
-                                <p>No matching shipping charges found for this route.</p>
-                                <p class="text-xs mt-1">Please check the Shipping Charges section to create charges for this route.</p>
-                            </div>
-                        `;
+                        breakdownHtml += '<div class="text-xs text-gray-600 mt-1 pt-2 border-t border-green-200">';
+                        breakdownHtml += '<span>No formulas found for Network: ' + (data.base_price_info.network || 'N/A') + ', Service: ' + (data.base_price_info.service || 'N/A') + '</span>';
+                        breakdownHtml += '<br><span class="text-gray-400">Using default calculation (₹10 per kg)</span>';
+                        breakdownHtml += '</div>';
                     }
+                    
+                    breakdownHtml += '</div>';
+                    
+                    // Distance Charge
+                    breakdownHtml += '<div class="breakdown-item">';
+                    breakdownHtml += '<div class="flex justify-between items-center">';
+                    breakdownHtml += '<span class="text-sm font-medium text-gray-700">Distance Charge</span>';
+                    breakdownHtml += '<span class="text-sm font-bold text-gray-900">₹' + data.breakdown.distance_charge.toFixed(2) + '</span>';
+                    breakdownHtml += '</div>';
+                    breakdownHtml += '</div>';
+                    
+                    // Service Type
+                    breakdownHtml += '<div class="breakdown-item bg-purple-50 border-purple-200">';
+                    breakdownHtml += '<div class="flex justify-between items-center">';
+                    breakdownHtml += '<span class="text-sm font-bold text-purple-700">Service Type</span>';
+                    breakdownHtml += '<span class="text-sm font-bold text-purple-900">' + data.breakdown.service_type + '</span>';
+                    breakdownHtml += '</div>';
+                    breakdownHtml += '</div>';
+                    
+                    document.getElementById('rateBreakdown').innerHTML = breakdownHtml;
                     
                     // Show result card
                     resultCard.classList.add('show');

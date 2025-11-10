@@ -433,8 +433,7 @@
             if (confirm('Are you sure you want to delete this service?')) {
                 const form = document.createElement('form');
                 form.method = 'POST';
-                const deleteUrl = '{{ route("admin.services.delete", ":id") }}'.replace(':id', id);
-                form.action = deleteUrl;
+                form.action = '{{ url("/admin/services") }}/' + id;
                 
                 const methodInput = document.createElement('input');
                 methodInput.type = 'hidden';

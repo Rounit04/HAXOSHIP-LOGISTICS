@@ -390,19 +390,50 @@
         const serviceSelect = document.getElementById('service');
         const services = @json($services);
 
-        networkSelect.addEventListener('change', function() {
-            const selectedNetwork = this.value;
+        // Populate services when network changes
+        function populateServices() {
+            const selectedNetwork = networkSelect.value;
             serviceSelect.innerHTML = '<option value="">Select Service</option>';
             
             if (selectedNetwork) {
-                const filteredServices = services.filter(service => service.network === selectedNetwork);
-                filteredServices.forEach(service => {
-                    const option = document.createElement('option');
-                    option.value = service.name;
-                    option.textContent = service.name;
-                    serviceSelect.appendChild(option);
+                // Filter services by network and active status
+                const filteredServices = services.filter(service => {
+                    const serviceNetwork = (service.network || '').trim();
+                    const networkMatch = serviceNetwork === selectedNetwork.trim();
+                    const isActive = (service.status || '').toLowerCase() === 'active';
+                    return networkMatch && isActive;
                 });
+                
+                if (filteredServices.length > 0) {
+                    filteredServices.forEach(service => {
+                        const option = document.createElement('option');
+                        option.value = service.name || '';
+                        option.textContent = service.name || '';
+                        serviceSelect.appendChild(option);
+                    });
+                } else {
+                    // No services found for this network
+                    const noServiceOption = document.createElement('option');
+                    noServiceOption.value = '';
+                    noServiceOption.textContent = 'No services available for this network';
+                    noServiceOption.disabled = true;
+                    serviceSelect.appendChild(noServiceOption);
+                }
+            } else {
+                // No network selected
+                const noNetworkOption = document.createElement('option');
+                noNetworkOption.value = '';
+                noNetworkOption.textContent = 'Select Network First';
+                noNetworkOption.disabled = true;
+                serviceSelect.appendChild(noNetworkOption);
             }
+        }
+
+        // Update services when network changes
+        networkSelect.addEventListener('change', function() {
+            populateServices();
+            // Reset service selection when network changes
+            serviceSelect.value = '';
         });
 
         // Status toggle
@@ -419,9 +450,14 @@
             
             // Ensure status checkbox is properly handled
             const statusCheckbox = form.querySelector('input[name="status"]');
-            if (statusCheckbox && !statusCheckbox.checked) {
-                // Remove status if unchecked, or set it to false
-                formData.delete('status');
+            if (statusCheckbox) {
+                if (statusCheckbox.checked) {
+                    // Explicitly set status to "on" when checked
+                    formData.set('status', 'on');
+                } else {
+                    // Remove status when unchecked (will default to Inactive)
+                    formData.delete('status');
+                }
             }
             
             const submitButton = form.querySelector('button[type="submit"]');

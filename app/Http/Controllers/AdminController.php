@@ -436,20 +436,9 @@ class AdminController extends Controller
 
         // Get zones based on pincodes
         $zones = $this->getZones();
-        $originZone = null;
         $destinationZone = null;
         
-        // Find origin zone
-        $originZoneData = collect($zones)->first(function($zone) use ($request) {
-            return ($zone['pincode'] ?? '') == $request->origin_pincode 
-                && ($zone['country'] ?? '') == $request->origin_country
-                && ($zone['status'] ?? '') == 'Active';
-        });
-        if ($originZoneData) {
-            $originZone = $originZoneData['zone'] ?? null;
-        }
-        
-        // Find destination zone
+        // Find destination zone from destination pincode (for base price matching)
         $destinationZoneData = collect($zones)->first(function($zone) use ($request) {
             return ($zone['pincode'] ?? '') == $request->destination_pincode 
                 && ($zone['country'] ?? '') == $request->destination_country
@@ -459,100 +448,144 @@ class AdminController extends Controller
             $destinationZone = $destinationZoneData['zone'] ?? null;
         }
         
-        // Get all formulas and shipping charges
+        // Get all formulas, shipping charges, and services
         $allFormulas = $this->getFormulas();
         $allShippingCharges = $this->getShippingCharges();
+        $allServices = $this->getServices();
         $weight = (float)$request->weight;
         
-        // Match shipping charges based on route and weight
-        // Priority: Exact match (with zones) > Match without zones > Match by country only
-        $matchingCharges = collect($allShippingCharges)->filter(function($charge) use ($request, $originZone, $destinationZone, $weight) {
-            $matchesOrigin = ($charge['origin'] ?? '') == $request->origin_country;
-            $matchesDestination = ($charge['destination'] ?? '') == $request->destination_country;
-            $matchesShipmentType = ($charge['shipment_type'] ?? '') == $request->shipment_type;
-            $matchesWeight = $weight >= (float)($charge['min_weight'] ?? 0) && $weight <= (float)($charge['max_weight'] ?? 999999);
-            
-            // Must match origin, destination, shipment type, and weight
-            if (!$matchesOrigin || !$matchesDestination || !$matchesShipmentType || !$matchesWeight) {
-                return false;
+        // ============================================
+        // BASE PRICE: Find from shipping charges
+        // Matching criteria:
+        // 1. Destination zone matches (from destination pincode)
+        // 2. Find best matching network/service combination
+        // ============================================
+        $baseRate = 0;
+        $matchingBaseCharge = null;
+        $selectedNetwork = null;
+        $selectedService = null;
+        
+        // Find all shipping charges matching destination zone
+        $matchingBaseCharges = collect($allShippingCharges)->filter(function($charge) use ($destinationZone) {
+            // Must match destination zone (from destination pincode)
+            if ($destinationZone) {
+                $chargeDestinationZone = trim($charge['destination_zone'] ?? '');
+                if ($chargeDestinationZone != $destinationZone) {
+                    return false;
+                }
             }
             
-            // Zone matching is optional - if zones are found, prefer exact zone matches
-            if ($originZone && $destinationZone) {
-                $matchesOriginZone = ($charge['origin_zone'] ?? '') == $originZone || ($charge['origin_zone'] ?? '') == '';
-                $matchesDestinationZone = ($charge['destination_zone'] ?? '') == $destinationZone || ($charge['destination_zone'] ?? '') == '';
-                return $matchesOriginZone && $matchesDestinationZone;
-            }
-            
-            // If zones not found, match by country only
             return true;
-        })->sortBy(function($charge) use ($originZone, $destinationZone) {
-            // Prioritize exact zone matches
+        })->sortBy(function($charge) use ($destinationZone) {
+            // Prioritize exact zone matches, then by rate (lowest first)
             $score = 0;
-            if ($originZone && ($charge['origin_zone'] ?? '') == $originZone) {
-                $score += 10;
-            }
             if ($destinationZone && ($charge['destination_zone'] ?? '') == $destinationZone) {
                 $score += 10;
             }
+            // Add rate as secondary sort (lower rate = higher priority)
+            $rate = (float)($charge['rate'] ?? 999999);
+            $score += (1000 - $rate) / 1000; // Normalize rate for sorting
             return -$score; // Negative for descending sort
         })->values()->toArray();
         
-        // Match formulas - find all applicable formulas
-        // Formulas can apply based on:
-        // 1. Network/Service from matching charges (if any)
-        // 2. Or formulas with no specific network/service (general formulas)
-        // 3. Status must be Active
-        $appliedFormulas = [];
-        $formulaChargeTotal = 0;
-        $baseRate = 100; // Default base rate
-        
-        // Get networks and services from matching charges
-        $chargeNetworks = collect($matchingCharges)->pluck('network')->filter()->unique()->toArray();
-        $chargeServices = collect($matchingCharges)->pluck('service')->filter()->unique()->toArray();
-        
-        // Use first matching charge's rate as base rate if available
-        if (!empty($matchingCharges)) {
-            $firstCharge = $matchingCharges[0];
-            $chargeRate = (float)($firstCharge['rate'] ?? 0);
-            if ($chargeRate > 0) {
-                $baseRate = $chargeRate;
+        // Group matching charges by network/service combination
+        $groupedCharges = [];
+        foreach ($matchingBaseCharges as $charge) {
+            $network = trim($charge['network'] ?? '');
+            $service = trim($charge['service'] ?? '');
+            $key = $network . '|' . $service;
+            
+            if (!isset($groupedCharges[$key])) {
+                $groupedCharges[$key] = [];
             }
+            $groupedCharges[$key][] = $charge;
         }
         
-        // Find all active formulas that could apply
-        // A formula applies if:
-        // 1. It has no network specified (applies to all), OR
-        // 2. Its network matches one of the charge networks, OR
-        // 3. There are no matching charges (show all formulas)
+        // Get base rate from best matching shipping charge
+        // Priority: 1) Lowest rate, 2) First match
+        $matchingBaseCharge = null;
+        $allMatchingCharges = [];
+        $selectedServiceDetails = null;
+        
+        if (!empty($matchingBaseCharges)) {
+            // Sort by rate (lowest first) to get best price
+            $sortedCharges = collect($matchingBaseCharges)->sortBy(function($charge) {
+                return (float)($charge['rate'] ?? 999999);
+            })->values()->toArray();
+            
+            $matchingBaseCharge = $sortedCharges[0];
+            $baseRate = (float)($matchingBaseCharge['rate'] ?? 0);
+            $selectedNetwork = trim($matchingBaseCharge['network'] ?? '');
+            $selectedService = trim($matchingBaseCharge['service'] ?? '');
+            
+            // Find service details for selected network/service
+            $selectedServiceDetails = collect($allServices)->first(function($service) use ($selectedNetwork, $selectedService) {
+                $serviceNetwork = trim($service['network'] ?? '');
+                $serviceName = trim($service['name'] ?? '');
+                return $serviceNetwork == $selectedNetwork && $serviceName == $selectedService;
+            });
+            
+            // Collect all matching charges with same network/service for display
+            $allMatchingCharges = collect($matchingBaseCharges)->filter(function($charge) use ($selectedNetwork, $selectedService) {
+                return trim($charge['network'] ?? '') == $selectedNetwork && 
+                       trim($charge['service'] ?? '') == $selectedService;
+            })->values()->toArray();
+        }
+        
+        // Default base rate if no match found
+        if ($baseRate <= 0) {
+            $baseRate = 100; // Default fallback
+            }
+        
+        // ============================================
+        // WEIGHT PRICE: Find from formulas
+        // Matching criteria:
+        // 1. Network matches (from base charge)
+        // 2. Service matches (from base charge)
+        // Priority: Exact match > General formulas
+        // ============================================
+        $appliedFormulas = [];
+        $formulaChargeTotal = 0;
+        
+        // Find all active formulas
         $allActiveFormulas = collect($allFormulas)->filter(function($formula) {
             return ($formula['status'] ?? '') == 'Active';
         });
         
-        // Filter formulas that match the context
-        $applicableFormulas = $allActiveFormulas->filter(function($formula) use ($chargeNetworks, $chargeServices, $matchingCharges) {
-            $formulaNetwork = $formula['network'] ?? '';
-            $formulaService = $formula['service'] ?? '';
+        // Find formulas that match the exact network and service from base charge
+        $applicableFormulas = collect([]);
+        
+        if (!empty($selectedNetwork) && !empty($selectedService)) {
+            // Filter formulas that match the specific network and service EXACTLY
+            // Priority: Exact match (network AND service) > General formulas (no network/service)
+            $specificFormulas = $allActiveFormulas->filter(function($formula) use ($selectedNetwork, $selectedService) {
+                $formulaNetwork = trim($formula['network'] ?? '');
+                $formulaService = trim($formula['service'] ?? '');
+                
+                // Must match both network and service exactly
+                // OR formula has no network/service specified (general formula applies to all)
+                if (empty($formulaNetwork) && empty($formulaService)) {
+                    // General formula - applies to all
+                    return true;
+                }
+                
+                // Exact match required
+                return $formulaNetwork == $selectedNetwork && $formulaService == $selectedService;
+            });
             
-            // If no matching charges, show all formulas
-            if (empty($matchingCharges)) {
-                return true;
-            }
-            
-            // If formula has no network/service, it applies to all
-            if (empty($formulaNetwork) && empty($formulaService)) {
-                return true;
-            }
-            
-            // Check if formula network matches any charge network (or formula has no network)
-            $networkMatches = empty($formulaNetwork) || in_array($formulaNetwork, $chargeNetworks);
-            
-            // Check if formula service matches any charge service (or formula has no service)
-            $serviceMatches = empty($formulaService) || in_array($formulaService, $chargeServices);
-            
-            return $networkMatches && $serviceMatches;
-        })->sortBy(function($formula) {
-            // Sort by priority (1st, 2nd, 3rd, 4th)
+            // Use the matching formulas
+            $applicableFormulas = $specificFormulas;
+        } else {
+            // If no network/service from base charge, use general formulas only (no network/service)
+            $applicableFormulas = $allActiveFormulas->filter(function($formula) {
+                $formulaNetwork = trim($formula['network'] ?? '');
+                $formulaService = trim($formula['service'] ?? '');
+                return empty($formulaNetwork) && empty($formulaService);
+            });
+        }
+        
+        // Sort by priority (1st, 2nd, 3rd, 4th)
+        $applicableFormulas = $applicableFormulas->sortBy(function($formula) {
             $priority = $formula['priority'] ?? '4th';
             $priorityMap = ['1st' => 1, '2nd' => 2, '3rd' => 3, '4th' => 4];
             return $priorityMap[$priority] ?? 4;
@@ -560,34 +593,6 @@ class AdminController extends Controller
         
         // Calculate charges for each applicable formula
         foreach ($applicableFormulas as $formula) {
-            $formulaNetwork = $formula['network'] ?? '';
-            $formulaService = $formula['service'] ?? '';
-            
-            // Determine which network/service to associate this formula with
-            $displayNetwork = 'N/A';
-            $displayService = 'N/A';
-            
-            if (!empty($chargeNetworks) && !empty($formulaNetwork)) {
-                // Use formula's network if it matches a charge network
-                if (in_array($formulaNetwork, $chargeNetworks)) {
-                    $displayNetwork = $formulaNetwork;
-                }
-            } else if (!empty($formulaNetwork)) {
-                $displayNetwork = $formulaNetwork;
-            } else if (!empty($chargeNetworks)) {
-                $displayNetwork = $chargeNetworks[0];
-            }
-            
-            if (!empty($chargeServices) && !empty($formulaService)) {
-                if (in_array($formulaService, $chargeServices)) {
-                    $displayService = $formulaService;
-                }
-            } else if (!empty($formulaService)) {
-                $displayService = $formulaService;
-            } else if (!empty($chargeServices)) {
-                $displayService = $chargeServices[0];
-            }
-            
             // Calculate formula charge
             $calculatedCharge = 0;
             $formulaValue = (float)($formula['value'] ?? 0);
@@ -612,9 +617,10 @@ class AdminController extends Controller
             $formulaChargeTotal += $calculatedCharge;
             
             $appliedFormulas[] = array_merge($formula, [
+                'name' => $formula['formula_name'] ?? 'Formula',
                 'calculated_charge' => round($calculatedCharge, 2),
-                'network' => $displayNetwork,
-                'service' => $displayService,
+                'network' => $selectedNetwork ?: ($formula['network'] ?? 'N/A'),
+                'service' => $selectedService ?: ($formula['service'] ?? 'N/A'),
             ]);
         }
         
@@ -627,6 +633,111 @@ class AdminController extends Controller
         // Calculate total rate
         $totalRate = $baseRate + $weightCharge + $distanceCharge;
         
+        // Helper function to calculate weight charge for a given network/service
+        $calculateWeightChargeForNetworkService = function($network, $service, $baseRateForOption) use ($allActiveFormulas, $weight) {
+            $optionFormulas = [];
+            $optionFormulaTotal = 0;
+            
+            // Filter formulas for this network/service
+            $optionApplicableFormulas = $allActiveFormulas->filter(function($formula) use ($network, $service) {
+                $formulaNetwork = trim($formula['network'] ?? '');
+                $formulaService = trim($formula['service'] ?? '');
+                
+                // General formula applies to all
+                if (empty($formulaNetwork) && empty($formulaService)) {
+                    return true;
+                }
+                
+                // Exact match required
+                return $formulaNetwork == $network && $formulaService == $service;
+            })->sortBy(function($formula) {
+                $priority = $formula['priority'] ?? '4th';
+                $priorityMap = ['1st' => 1, '2nd' => 2, '3rd' => 3, '4th' => 4];
+                return $priorityMap[$priority] ?? 4;
+            })->values();
+            
+            // Calculate charges for each formula
+            foreach ($optionApplicableFormulas as $formula) {
+                $calculatedCharge = 0;
+                $formulaValue = (float)($formula['value'] ?? 0);
+                $formulaType = $formula['type'] ?? 'Fixed';
+                $formulaScope = $formula['scope'] ?? 'Flat';
+                
+                if ($formulaType == 'Fixed') {
+                    if ($formulaScope == 'per kg') {
+                        $calculatedCharge = $formulaValue * $weight;
+                    } else {
+                        $calculatedCharge = $formulaValue;
+                    }
+                } else { // Percentage
+                    if ($formulaScope == 'per kg') {
+                        $percentageAmount = ($baseRateForOption * $formulaValue / 100);
+                        $calculatedCharge = $percentageAmount * $weight;
+                    } else {
+                        $calculatedCharge = $baseRateForOption * $formulaValue / 100;
+                    }
+                }
+                
+                $optionFormulaTotal += $calculatedCharge;
+                
+                $optionFormulas[] = array_merge($formula, [
+                    'name' => $formula['formula_name'] ?? 'Formula',
+                    'calculated_charge' => round($calculatedCharge, 2),
+                ]);
+            }
+            
+            $weightCharge = $optionFormulaTotal > 0 ? $optionFormulaTotal : ($weight * 10);
+            
+            return [
+                'weight_charge' => round($weightCharge, 2),
+                'formulas' => $optionFormulas,
+            ];
+        };
+        
+        // Prepare all matching network/service combinations with weight charges
+        $allNetworkServiceOptions = [];
+        if (!empty($groupedCharges)) {
+            foreach ($groupedCharges as $key => $charges) {
+                // Get the best rate for this network/service combination
+                $bestCharge = collect($charges)->sortBy(function($charge) {
+                    return (float)($charge['rate'] ?? 999999);
+                })->first();
+                
+                if ($bestCharge) {
+                    $optionNetwork = trim($bestCharge['network'] ?? '');
+                    $optionService = trim($bestCharge['service'] ?? '');
+                    $optionBaseRate = (float)($bestCharge['rate'] ?? 0);
+                    
+                    // Find service details (transit_time and items_allowed)
+                    $serviceDetails = collect($allServices)->first(function($service) use ($optionNetwork, $optionService) {
+                        $serviceNetwork = trim($service['network'] ?? '');
+                        $serviceName = trim($service['name'] ?? '');
+                        return $serviceNetwork == $optionNetwork && $serviceName == $optionService;
+                    });
+                    
+                    // Calculate weight charge for this network/service
+                    $weightChargeData = $calculateWeightChargeForNetworkService($optionNetwork, $optionService, $optionBaseRate);
+                    
+                    // Calculate total rate for this option
+                    $optionTotalRate = $optionBaseRate + $weightChargeData['weight_charge'] + $distanceCharge;
+                    
+                    $allNetworkServiceOptions[] = [
+                        'network' => $optionNetwork,
+                        'service' => $optionService,
+                        'base_rate' => $optionBaseRate,
+                        'weight_charge' => $weightChargeData['weight_charge'],
+                        'distance_charge' => $distanceCharge,
+                        'total_rate' => round($optionTotalRate, 2),
+                        'count' => count($charges),
+                        'formulas' => $weightChargeData['formulas'],
+                        'transit_time' => $serviceDetails['transit_time'] ?? 'N/A',
+                        'items_allowed' => $serviceDetails['items_allowed'] ?? 'N/A',
+                        'is_selected' => $optionNetwork == $selectedNetwork && $optionService == $selectedService,
+                    ];
+                }
+            }
+        }
+        
         return response()->json([
             'success' => true,
             'rate' => round($totalRate, 2),
@@ -638,9 +749,17 @@ class AdminController extends Controller
                 'distance_charge' => round($distanceCharge, 2),
                 'service_type' => $request->shipment_type,
             ],
+            'base_price_info' => [
+                'network' => $selectedNetwork ?: 'N/A',
+                'service' => $selectedService ?: 'N/A',
+                'destination_zone' => $destinationZone ?: 'N/A',
+                'transit_time' => $selectedServiceDetails['transit_time'] ?? 'N/A',
+                'items_allowed' => $selectedServiceDetails['items_allowed'] ?? 'N/A',
+            ],
             'applied_formulas' => $appliedFormulas,
-            'matching_charges' => $matchingCharges,
-            'origin_zone' => $originZone,
+            'matching_base_charge' => $matchingBaseCharge,
+            'all_matching_charges' => $allMatchingCharges,
+            'all_network_service_options' => $allNetworkServiceOptions,
             'destination_zone' => $destinationZone,
         ]);
     }
@@ -1495,19 +1614,26 @@ class AdminController extends Controller
 
     public function deleteService($id)
     {
+        try {
         $services = $this->getServices();
         if (!is_array($services)) {
             $services = [];
         }
+            
+            // Convert ID to integer for proper comparison
+            $id = (int)$id;
         
         $services = array_filter($services, function($service) use ($id) {
-            return $service['id'] != $id;
+                return (int)($service['id'] ?? 0) != $id;
         });
         
         session(['services' => array_values($services)]);
         session()->save();
         
         return redirect()->route('admin.services.all')->with('success', 'Service deleted successfully!');
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Error deleting service: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -2183,14 +2309,8 @@ class AdminController extends Controller
         $services = $this->getServices();
         $shipmentTypes = $this->getShipmentTypes();
         
-        // Get unique zones from zones data
-        $zoneOptions = collect($zones)->pluck('zone')->unique()->sort()->values()->toArray();
-        if (!in_array('No Zone', $zoneOptions)) {
-            array_unshift($zoneOptions, 'No Zone');
-        }
-        if (!in_array('Remote', $zoneOptions)) {
-            $zoneOptions[] = 'Remote';
-        }
+        // Get zone options (includes No Zone, Remote, and Zone 1-60)
+        $zoneOptions = array_values($this->getZoneOptions());
         
         return view('admin.shipping-charges.create', [
             'shippingCharges' => $shippingCharges,
@@ -2256,14 +2376,8 @@ class AdminController extends Controller
         $services = $this->getServices();
         $shipmentTypes = $this->getShipmentTypes();
         
-        // Get unique zones from zones data
-        $zoneOptions = collect($zones)->pluck('zone')->unique()->sort()->values()->toArray();
-        if (!in_array('No Zone', $zoneOptions)) {
-            array_unshift($zoneOptions, 'No Zone');
-        }
-        if (!in_array('Remote', $zoneOptions)) {
-            $zoneOptions[] = 'Remote';
-        }
+        // Get zone options (includes No Zone, Remote, and Zone 1-60)
+        $zoneOptions = array_values($this->getZoneOptions());
         
         if (!$charge) {
             return redirect()->route('admin.shipping-charges.all')->with('error', 'Shipping charge not found');
@@ -2624,10 +2738,12 @@ class AdminController extends Controller
             'priority' => 'required|string|in:1st,2nd,3rd,4th',
             'value' => 'required|numeric|min:0',
             'remark' => 'nullable|string',
-            'status' => 'nullable|boolean',
+            'status' => 'nullable',
         ]);
 
-        $status = $request->has('status') && $request->status ? 'Active' : 'Inactive';
+        // Convert checkbox value to status string
+        $statusValue = $request->input('status');
+        $status = ($statusValue === 'on' || $statusValue === '1' || $statusValue === 1 || $statusValue === true || $statusValue === 'true') ? 'Active' : 'Inactive';
 
         $formulas = $this->getFormulas();
         if (!is_array($formulas)) {
@@ -2653,6 +2769,15 @@ class AdminController extends Controller
         session(['formulas' => $formulas]);
         session()->save();
 
+        // Return JSON response for AJAX requests
+        if ($request->ajax() || $request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Formula created successfully!',
+                'redirect' => route('admin.formulas.all')
+            ]);
+        }
+
         return redirect()->route('admin.formulas.all')->with('success', 'Formula created successfully!');
     }
 
@@ -2667,10 +2792,12 @@ class AdminController extends Controller
             'priority' => 'required|string|in:1st,2nd,3rd,4th',
             'value' => 'required|numeric|min:0',
             'remark' => 'nullable|string',
-            'status' => 'nullable|boolean',
+            'status' => 'nullable',
         ]);
 
-        $status = $request->has('status') && $request->status ? 'Active' : 'Inactive';
+        // Convert checkbox value to status string
+        $statusValue = $request->input('status');
+        $status = ($statusValue === 'on' || $statusValue === '1' || $statusValue === 1 || $statusValue === true || $statusValue === 'true') ? 'Active' : 'Inactive';
 
         $formulas = $this->getFormulas();
         if (!is_array($formulas)) {
@@ -2697,6 +2824,15 @@ class AdminController extends Controller
         
         session(['formulas' => array_values($formulas)]);
         session()->save();
+
+        // Return JSON response for AJAX requests
+        if ($request->ajax() || $request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Formula updated successfully!',
+                'redirect' => route('admin.formulas.all')
+            ]);
+        }
 
         return redirect()->route('admin.formulas.all')->with('success', 'Formula updated successfully!');
     }
