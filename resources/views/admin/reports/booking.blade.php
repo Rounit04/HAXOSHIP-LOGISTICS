@@ -12,60 +12,6 @@
             box-shadow: 0 1px 4px rgba(0,0,0,0.04);
             border: 1px solid rgba(255, 117, 15, 0.1);
         }
-        .filter-section {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-            border: 1px solid rgba(0,0,0,0.06);
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        .filter-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 15px;
-        }
-        .filter-group {
-            display: flex;
-            flex-direction: column;
-        }
-        .filter-label {
-            font-size: 12px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 6px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .filter-input, .filter-select {
-            width: 100%;
-            padding: 10px 14px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            color: #374151;
-            background: white;
-            transition: all 0.3s ease;
-        }
-        .filter-input:focus, .filter-select:focus {
-            outline: none;
-            border-color: #FF750F;
-            box-shadow: 0 0 0 4px rgba(255, 117, 15, 0.1);
-            background: #fff5ed;
-        }
-        .report-actions {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-            border: 1px solid rgba(0,0,0,0.06);
-            padding: 20px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
         .report-card {
             background: white;
             border-radius: 12px;
@@ -88,11 +34,6 @@
             letter-spacing: 0.5px;
             color: #4b5563;
             border-bottom: 2px solid #e5e7eb;
-            position: relative;
-            cursor: pointer;
-        }
-        .report-table thead th:hover {
-            background: rgba(255, 117, 15, 0.1);
         }
         .report-table tbody tr {
             border-bottom: 1px solid #f3f4f6;
@@ -115,18 +56,45 @@
             background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
             color: #065f46;
         }
-        .search-input {
-            padding: 10px 14px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 14px;
-            width: 300px;
-            transition: all 0.3s ease;
-        }
-        .search-input:focus {
-            outline: none;
-            border-color: #FF750F;
-            box-shadow: 0 0 0 4px rgba(255, 117, 15, 0.1);
+        
+        /* Print Styles */
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            .printable-table, .printable-table * {
+                visibility: visible;
+            }
+            .printable-table {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+            }
+            .page-header,
+            .report-card > div:first-child,
+            button,
+            .empty-state {
+                display: none !important;
+            }
+            .report-table {
+                border-collapse: collapse;
+            }
+            .report-table thead th,
+            .report-table tbody td {
+                border: 1px solid #000;
+                padding: 8px;
+                font-size: 12px;
+            }
+            .report-table thead {
+                background: #f3f4f6 !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            .badge, .status-badge, .amount-badge {
+                border: 1px solid #000;
+                padding: 4px 8px;
+            }
         }
     </style>
 
@@ -144,92 +112,20 @@
                     <p class="text-xs text-gray-600">Different Report according to user</p>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Filter Section -->
-    <div class="filter-section">
-        <form method="GET" action="{{ route('admin.reports.booking') }}" id="filterForm">
-            <div class="filter-grid">
-                <div class="filter-group">
-                    <label class="filter-label">Select Category</label>
-                    <select name="category" class="filter-select" onchange="updateBranches()">
-                        <option value="">All Categories</option>
-                        @foreach($categories ?? [] as $key => $label)
-                            <option value="{{ $key }}" {{ ($category ?? '') == $key ? 'selected' : '' }}>{{ $label }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label class="filter-label">Select Hub</label>
-                    <select name="hub" id="hubSelect" class="filter-select" onchange="updateBranches()">
-                        <option value="">All Hubs</option>
-                        @foreach($hubs ?? [] as $hubItem)
-                            <option value="{{ $hubItem }}" {{ ($hub ?? '') == $hubItem ? 'selected' : '' }}>{{ $hubItem }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label class="filter-label">Select Branch</label>
-                    <select name="branch" id="branchSelect" class="filter-select">
-                        <option value="">All Branches</option>
-                        @foreach($branches ?? [] as $branchItem)
-                            <option value="{{ $branchItem }}" {{ ($branch ?? '') == $branchItem ? 'selected' : '' }}>{{ $branchItem }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label class="filter-label">From Date</label>
-                    <input type="date" name="date_from" class="filter-input" value="{{ $dateFrom ?? '' }}" placeholder="dd-mm-yyyy">
-                </div>
-                <div class="filter-group">
-                    <label class="filter-label">To Date</label>
-                    <input type="date" name="date_to" class="filter-input" value="{{ $dateTo ?? '' }}" placeholder="dd-mm-yyyy">
-                </div>
-                <div class="filter-group" style="display: flex; align-items: flex-end;">
-                    <button type="submit" class="admin-btn-primary px-6 py-2.5 text-sm font-semibold w-full">
-                        <div class="flex items-center justify-center gap-2">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
-                            </svg>
-                            <span>Show</span>
-                        </div>
-                    </button>
-                </div>
-            </div>
-        </form>
-    </div>
-
-    <!-- Report Actions -->
-    <div class="report-actions">
-        <h2 class="text-lg font-bold text-gray-900">View Reports</h2>
-        <div class="flex items-center gap-4">
-            <form method="GET" action="{{ route('admin.reports.booking.export') }}" id="exportForm" style="display: inline;">
-                <input type="hidden" name="category" value="{{ $category ?? '' }}">
-                <input type="hidden" name="hub" value="{{ $hub ?? '' }}">
-                <input type="hidden" name="branch" value="{{ $branch ?? '' }}">
-                <input type="hidden" name="date_from" value="{{ $dateFrom ?? '' }}">
-                <input type="hidden" name="date_to" value="{{ $dateTo ?? '' }}">
-                <input type="hidden" name="search" value="{{ $search ?? '' }}">
-                <button type="submit" class="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-lg transition text-sm flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="flex items-center gap-3">
+                <a href="{{ route('admin.reports.booking.export') }}" class="admin-btn-primary px-5 py-2.5 text-sm font-semibold flex items-center gap-2">
+                    <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                     </svg>
                     Export to Excel
+                </a>
+                <button onclick="printReportTable()" class="px-5 py-2.5 rounded-xl border-2 border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+                    </svg>
+                    Print
                 </button>
-            </form>
-            <form method="GET" action="{{ route('admin.reports.booking') }}" class="flex items-center gap-2">
-                <input type="hidden" name="category" value="{{ $category ?? '' }}">
-                <input type="hidden" name="hub" value="{{ $hub ?? '' }}">
-                <input type="hidden" name="branch" value="{{ $branch ?? '' }}">
-                <input type="hidden" name="date_from" value="{{ $dateFrom ?? '' }}">
-                <input type="hidden" name="date_to" value="{{ $dateTo ?? '' }}">
-                <label class="text-sm font-semibold text-gray-700">Search:</label>
-                <input type="text" name="search" class="search-input" value="{{ $search ?? '' }}" placeholder="Search AWB, origin, destination, admin...">
-                <button type="submit" class="admin-btn-primary px-4 py-2.5 text-sm font-semibold">
-                    Search
-                </button>
-            </form>
+            </div>
         </div>
     </div>
 
@@ -243,12 +139,12 @@
                 Booking Report Data
             </h2>
             <div class="text-sm text-gray-600 font-medium">
-                Total: <span class="font-bold text-orange-600">{{ count($bookings ?? []) + count($directEntryBookings ?? []) }}</span> Bookings
+                Total: <span class="font-bold text-orange-600">{{ count($bookings) + count($directEntryBookings) }}</span> Bookings
             </div>
         </div>
 
-        <div class="overflow-x-auto rounded-lg border border-gray-200">
-            @if(count($bookings ?? []) > 0 || count($directEntryBookings ?? []) > 0)
+        <div class="overflow-x-auto rounded-lg border border-gray-200 printable-table">
+            @if(count($bookings) > 0 || count($directEntryBookings) > 0)
                 <table class="report-table min-w-full">
                     <thead>
                         <tr>
@@ -262,11 +158,10 @@
                             <th>Pieces</th>
                             <th>Booking Amount</th>
                             <th>Type</th>
-                            <th>Admin Name</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($bookings ?? [] as $booking)
+                        @foreach($bookings as $booking)
                             <tr>
                                 <td class="font-bold text-gray-900">#{{ $booking['id'] }}</td>
                                 <td>{{ $booking['current_booking_date'] ?? date('Y-m-d') }}</td>
@@ -278,10 +173,9 @@
                                 <td>{{ $booking['pieces'] ?? 1 }}</td>
                                 <td><span class="amount-badge">₹{{ number_format($booking['booking_amount'] ?? 0, 2) }}</span></td>
                                 <td><span class="badge">Regular</span></td>
-                                <td class="font-medium">{{ $booking['admin_name'] ?? 'System' }}</td>
                             </tr>
                         @endforeach
-                        @foreach($directEntryBookings ?? [] as $booking)
+                        @foreach($directEntryBookings as $booking)
                             <tr>
                                 <td class="font-bold text-gray-900">#{{ $booking['id'] }}</td>
                                 <td>{{ $booking['current_booking_date'] ?? date('Y-m-d') }}</td>
@@ -293,7 +187,6 @@
                                 <td>{{ $booking['pieces'] ?? 1 }}</td>
                                 <td><span class="amount-badge">₹{{ number_format($booking['booking_amount'] ?? 0, 2) }}</span></td>
                                 <td><span class="badge">Direct Entry</span></td>
-                                <td class="font-medium">{{ $booking['admin_name'] ?? 'System' }}</td>
                             </tr>
                         @endforeach
                     </tbody>
@@ -311,34 +204,9 @@
     </div>
 
     <script>
-        // Store all branches for filtering
-        const allBranches = @json($branches ?? []);
-        
-        function updateBranches() {
-            const hubSelect = document.getElementById('hubSelect');
-            const branchSelect = document.getElementById('branchSelect');
-            const selectedHub = hubSelect.value;
-            
-            // Clear branch options except "All Branches"
-            branchSelect.innerHTML = '<option value="">All Branches</option>';
-            
-            // Filter branches based on selected hub
-            allBranches.forEach(branch => {
-                const option = document.createElement('option');
-                option.value = branch;
-                option.textContent = branch;
-                @if(isset($branch) && $branch)
-                    if (branch === '{{ $branch }}') {
-                        option.selected = true;
-                    }
-                @endif
-                branchSelect.appendChild(option);
-            });
+        function printReportTable() {
+            window.print();
         }
-        
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            updateBranches();
-        });
     </script>
 @endsection
+
