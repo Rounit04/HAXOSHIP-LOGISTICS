@@ -190,7 +190,7 @@
                         </div>
                     </div>
 
-                    <form method="POST" action="{{ route('login') }}" class="space-y-6">
+                    <form method="POST" action="{{ route('login.submit') }}" class="space-y-6">
                         @csrf
 
                         <!-- Email Field -->

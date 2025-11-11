@@ -33,15 +33,9 @@ class NotificationSetting extends Model
      */
     public static function getSettings()
     {
-        $settings = self::all()->keyBy('key');
-        
-        // If no settings exist, create defaults
-        if ($settings->isEmpty()) {
-            self::createDefaults();
-            $settings = self::all()->keyBy('key');
-        }
-        
-        return $settings;
+        self::ensureDefaultsExist();
+
+        return self::all()->keyBy('key');
     }
 
     /**
@@ -64,7 +58,7 @@ class NotificationSetting extends Model
     /**
      * Create default notification settings
      */
-    public static function createDefaults()
+    public static function ensureDefaultsExist(): void
     {
         $defaults = [
             [
@@ -94,10 +88,19 @@ class NotificationSetting extends Model
                 'show_dropdown' => true,
                 'polling_interval' => 30,
             ],
+            [
+                'key' => 'todo_reminder',
+                'title' => 'Todo Reminder Notifications',
+                'description' => 'Receive alerts when a todo reminder is due.',
+                'enabled' => true,
+                'show_popup' => true,
+                'show_dropdown' => true,
+                'polling_interval' => 60,
+            ],
         ];
 
         foreach ($defaults as $default) {
-            self::create($default);
+            self::firstOrCreate(['key' => $default['key']], $default);
         }
     }
 

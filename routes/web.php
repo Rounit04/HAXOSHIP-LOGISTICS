@@ -1,36 +1,28 @@
 <?php
 
-use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AdminAuthController;
+use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminTodoController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ErrorController;
+use App\Http\Controllers\FrontendController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    $settings = \App\Models\FrontendSetting::getSettings();
-    $blogs = \App\Models\Blog::where('status', 'published')->latest()->take(3)->get();
-    return view('home', compact('settings', 'blogs'));
-})->name('home');
-
-Route::get('/pricing', fn() => view('pricing'))->name('pricing');
-Route::get('/tracking', fn() => view('tracking'))->name('tracking');
-Route::get('/blogs', function () {
-    $blogs = \App\Models\Blog::where('status', 'published')->latest()->get();
-    return view('blogs', compact('blogs'));
-})->name('blogs');
-Route::get('/about', fn() => view('about'))->name('about');
-Route::get('/contact', function () {
-    $settings = \App\Models\FrontendSetting::getSettings();
-    return view('contact', compact('settings'));
-})->name('contact');
-Route::get('/faq', fn() => view('faq'))->name('faq');
-Route::get('/privacy-policy', fn() => view('privacy-policy'))->name('privacy-policy');
-Route::get('/terms-of-use', fn() => view('terms-of-use'))->name('terms-of-use');
+Route::get('/', [FrontendController::class, 'home'])->name('home');
+Route::view('/pricing', 'pricing')->name('pricing');
+Route::view('/tracking', 'tracking')->name('tracking');
+Route::get('/blogs', [FrontendController::class, 'blogs'])->name('blogs');
+Route::view('/about', 'about')->name('about');
+Route::get('/contact', [FrontendController::class, 'contact'])->name('contact');
+Route::view('/faq', 'faq')->name('faq');
+Route::view('/privacy-policy', 'privacy-policy')->name('privacy-policy');
+Route::view('/terms-of-use', 'terms-of-use')->name('terms-of-use');
 
 // Authentication Routes
 Route::get('/login', [App\Http\Controllers\AuthController::class, 'showLoginForm'])->name('login');
-Route::post('/login', [App\Http\Controllers\AuthController::class, 'login'])->name('login');
+Route::post('/login', [App\Http\Controllers\AuthController::class, 'login'])->name('login.submit');
 Route::get('/register', [App\Http\Controllers\AuthController::class, 'showRegisterForm'])->name('register');
-Route::post('/register', [App\Http\Controllers\AuthController::class, 'register'])->name('register');
+Route::post('/register', [App\Http\Controllers\AuthController::class, 'register'])->name('register.submit');
 Route::post('/logout', [App\Http\Controllers\AuthController::class, 'logout'])->name('logout');
 
 // User Dashboard (Protected)
@@ -48,17 +40,12 @@ Route::get('/auth/google/callback', [App\Http\Controllers\AuthController::class,
 // Admin Login Routes (Public)
 Route::prefix('admin')->name('admin.')->group(function () {
     // Redirect /admin to login or dashboard based on authentication
-    Route::get('/', function () {
-        if (session()->has('admin_logged_in') && session('admin_logged_in') === true) {
-            return redirect()->route('admin.dashboard');
-        }
-        return redirect()->route('admin.login');
-    });
+    Route::get('/', [AdminAuthController::class, 'entry'])->name('entry');
     
     Route::get('/login', [AdminAuthController::class, 'showLoginForm'])->name('login');
     Route::post('/login', [AdminAuthController::class, 'login'])->name('login.submit');
     Route::get('/logout', [AdminAuthController::class, 'logout'])->name('logout');
-    Route::post('/logout', [AdminAuthController::class, 'logout'])->name('logout');
+    Route::post('/logout', [AdminAuthController::class, 'logout'])->name('logout.submit');
 });
 
 // Admin routes (Protected)
@@ -362,8 +349,15 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
         Route::get('/list', [AdminController::class, 'payrollList'])->name('list');
         Route::get('/sand-bullary-generate', [AdminController::class, 'sandBullaryGenerateIndex'])->name('sand-bullary-generate.index');
     });
+
+    Route::prefix('todos')->name('todos.')->group(function () {
+        Route::get('/', [AdminTodoController::class, 'index'])->name('index');
+        Route::post('/', [AdminTodoController::class, 'store'])->name('store');
+        Route::put('/{id}', [AdminTodoController::class, 'update'])->name('update');
+        Route::post('/{id}/toggle-complete', [AdminTodoController::class, 'toggleComplete'])->name('toggle-complete');
+        Route::delete('/{id}', [AdminTodoController::class, 'destroy'])->name('destroy');
+        Route::get('/poll/reminders', [AdminTodoController::class, 'pollReminders'])->name('poll-reminders');
+    });
 });
 
-Route::fallback(function () {
-    return response()->view('errors.404', [], 404);
-});
+Route::fallback([ErrorController::class, 'notFound']);

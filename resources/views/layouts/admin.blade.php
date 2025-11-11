@@ -1542,13 +1542,13 @@
                         </div>
 
                         <!-- Todo List -->
-                        <a href="{{ route('admin.users') }}" class="nav-link flex items-center gap-3 px-4 py-3 rounded-xl">
-                            <div class="w-10 h-10 rounded-lg flex items-center justify-center transition-all" style="background: rgba(255, 117, 15, 0.08);">
-                                <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <a href="{{ route('admin.todos.index') }}" class="nav-link flex items-center gap-3 px-4 py-3 rounded-xl @if(request()->routeIs('admin.todos*')) active @endif">
+                            <div class="w-10 h-10 rounded-lg flex items-center justify-center transition-all" style="@if(request()->routeIs('admin.todos*')) background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); @else background: rgba(255, 117, 15, 0.08); @endif">
+                                <svg class="w-5 h-5 @if(request()->routeIs('admin.todos*')) text-white @else text-gray-600 @endif" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
                                 </svg>
                             </div>
-                            <span class="font-semibold text-sm">Todo List</span>
+                            <span class="font-semibold text-sm @if(request()->routeIs('admin.todos*')) text-white @else text-gray-700 @endif">Todo List</span>
                         </a>
 
                         <!-- Settings -->
@@ -1994,13 +1994,21 @@
             }
             
             // Poll for new notifications with dynamic interval
+            function triggerTodoReminders() {
+                fetch('{{ route("admin.todos.poll-reminders") }}')
+                    .then(() => {})
+                    .catch(error => console.error('Error triggering todo reminders:', error));
+            }
+
             function startNotificationPolling() {
                 loadNotifications();
+                triggerTodoReminders();
                 
                 // Get polling interval from settings (default 30 seconds)
                 let pollingInterval = {{ \App\Models\NotificationSetting::getPollingInterval() }} * 1000;
                 
                 notificationPollInterval = setInterval(function() {
+                    triggerTodoReminders();
                     fetch('{{ route("admin.notifications.unread-count") }}')
                         .then(response => response.json())
                         .then(data => {

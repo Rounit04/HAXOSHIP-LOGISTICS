@@ -12,6 +12,18 @@ use App\Models\NotificationSetting;
 class AdminAuthController extends Controller
 {
     /**
+     * Entry point for /admin route; redirect based on authentication status.
+     */
+    public function entry()
+    {
+        if (session()->has('admin_logged_in') && session('admin_logged_in') === true) {
+            return redirect()->route('admin.dashboard');
+        }
+
+        return redirect()->route('admin.login');
+    }
+
+    /**
      * Show the admin login form
      */
     public function showLoginForm()
