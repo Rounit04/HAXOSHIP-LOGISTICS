@@ -89,7 +89,7 @@
                     Bank Information
                 </h2>
 
-                <form method="POST" action="{{ route('admin.banks.update', $bank->id) }}">
+                <form method="POST" action="{{ route('admin.banks.update', $bank['id']) }}">
                     @csrf
                     @method('PUT')
 
@@ -101,7 +101,7 @@
                             </svg>
                             Bank Name <span class="required">*</span>
                         </label>
-                        <input type="text" name="bank_name" id="bank_name" class="form-input" placeholder="e.g., HDFC Bank" value="{{ old('bank_name', $bank->bank_name) }}" required>
+                        <input type="text" name="bank_name" id="bank_name" class="form-input" placeholder="e.g., HDFC Bank" value="{{ old('bank_name', $bank['bank_name'] ?? '') }}" required>
                         @error('bank_name')
                             <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                         @enderror
@@ -115,7 +115,7 @@
                             </svg>
                             Bank Account Holder Name <span class="required">*</span>
                         </label>
-                        <input type="text" name="account_holder_name" id="account_holder_name" class="form-input" placeholder="e.g., Haxo Shipping Pvt Ltd" value="{{ old('account_holder_name', $bank->account_holder_name) }}" required>
+                        <input type="text" name="account_holder_name" id="account_holder_name" class="form-input" placeholder="e.g., Haxo Shipping Pvt Ltd" value="{{ old('account_holder_name', $bank['account_holder_name'] ?? '') }}" required>
                         @error('account_holder_name')
                             <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                         @enderror
@@ -129,7 +129,7 @@
                             </svg>
                             Account No. <span class="required">*</span>
                         </label>
-                        <input type="text" name="account_number" id="account_number" class="form-input" placeholder="e.g., 123456789012" value="{{ old('account_number', $bank->account_number) }}" required>
+                        <input type="text" name="account_number" id="account_number" class="form-input" placeholder="e.g., 123456789012" value="{{ old('account_number', $bank['account_number'] ?? '') }}" required>
                         @error('account_number')
                             <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                         @enderror
@@ -143,7 +143,7 @@
                             </svg>
                             IFSC Code <span class="required">*</span>
                         </label>
-                        <input type="text" name="ifsc_code" id="ifsc_code" class="form-input" placeholder="e.g., HDFC0001234" value="{{ old('ifsc_code', $bank->ifsc_code) }}" required>
+                        <input type="text" name="ifsc_code" id="ifsc_code" class="form-input" placeholder="e.g., HDFC0001234" value="{{ old('ifsc_code', $bank['ifsc_code'] ?? '') }}" required>
                         @error('ifsc_code')
                             <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                         @enderror
@@ -157,7 +157,7 @@
                             </svg>
                             Opening Balance <span class="required">*</span>
                         </label>
-                        <input type="number" name="opening_balance" id="opening_balance" class="form-input" placeholder="e.g., 50000.00" value="{{ old('opening_balance', $bank->opening_balance) }}" step="0.01" min="0" required>
+                        <input type="number" name="opening_balance" id="opening_balance" class="form-input" placeholder="e.g., 50000.00" value="{{ old('opening_balance', $bank['opening_balance'] ?? 0) }}" step="0.01" min="0" required>
                         @error('opening_balance')
                             <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                         @enderror

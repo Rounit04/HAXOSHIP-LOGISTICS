@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 
 class FrontendSetting extends Model
 {
@@ -50,6 +52,17 @@ class FrontendSetting extends Model
         'contact_address',
     ];
 
+    protected static function booted()
+    {
+        static::retrieved(function (FrontendSetting $settings) {
+            $settings->ensurePublicAssetCopies();
+        });
+
+        static::saved(function (FrontendSetting $settings) {
+            $settings->ensurePublicAssetCopies();
+        });
+    }
+
     /**
      * Get the current frontend settings or create default
      */
@@ -69,5 +82,34 @@ class FrontendSetting extends Model
             ]);
         }
         return $settings;
+    }
+
+    /**
+     * Ensure assets stored on the public disk are copied into the publicly accessible directory.
+     */
+    protected function ensurePublicAssetCopies(): void
+    {
+        $disk = Storage::disk('public');
+
+        foreach (['logo', 'banner', 'footer_logo'] as $attribute) {
+            $relativePath = $this->{$attribute};
+
+            if (empty($relativePath) || !$disk->exists($relativePath)) {
+                continue;
+            }
+
+            $targetPath = public_path('storage/' . $relativePath);
+
+            if (File::exists($targetPath)) {
+                continue;
+            }
+
+            $targetDirectory = dirname($targetPath);
+            if (!File::exists($targetDirectory)) {
+                File::makeDirectory($targetDirectory, 0755, true);
+            }
+
+            File::copy($disk->path($relativePath), $targetPath);
+        }
     }
 }

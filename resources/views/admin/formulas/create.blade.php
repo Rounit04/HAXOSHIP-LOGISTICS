@@ -2,6 +2,26 @@
 
 @section('title', 'Create Formula')
 
+@php
+    $existingPriorities = array_values(array_filter(array_unique(array_map(function ($priority) {
+        return strtolower(trim($priority ?? ''));
+    }, array_column($formulas, 'priority')))));
+
+    $formulaSummaries = array_map(function ($formula) {
+        return [
+            'id' => $formula['id'] ?? null,
+            'formula_name' => $formula['formula_name'] ?? '',
+            'network' => $formula['network'] ?? '',
+            'service' => $formula['service'] ?? '',
+            'priority' => $formula['priority'] ?? '',
+            'type' => $formula['type'] ?? '',
+            'scope' => $formula['scope'] ?? '',
+            'status' => $formula['status'] ?? '',
+            'value' => isset($formula['value']) ? (float) $formula['value'] : null,
+        ];
+    }, $formulas ?? []);
+@endphp
+
 @section('content')
     <style>
         .page-header {
@@ -162,6 +182,126 @@
         </div>
     </div>
 
+    @if(session('success') || session('error') || $errors->any())
+        <div class="mb-6">
+            @if(session('success'))
+                <div class="flex items-center gap-3 px-4 py-3 rounded-lg border border-green-200 bg-green-50 text-green-700 text-sm font-semibold">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    {{ session('success') }}
+                </div>
+            @endif
+
+            @if(session('error'))
+                <div class="flex items-center gap-3 px-4 py-3 rounded-lg border border-red-200 bg-red-50 text-red-600 text-sm font-semibold">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                    {{ session('error') }}
+                </div>
+            @endif
+
+            @if($errors->any())
+                <div class="mt-3">
+                    <div class="flex items-start gap-3 px-4 py-3 rounded-lg border border-red-200 bg-red-50 text-red-600 text-sm">
+                        <svg class="w-4 h-4 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                        <div>
+                            <p class="font-semibold mb-1">Please fix the following:</p>
+                            <ul class="list-disc list-inside space-y-1">
+                                @foreach ($errors->all() as $error)
+                                    <li>{{ $error }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            @endif
+        </div>
+    @endif
+
+    <div class="form-card p-6 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+                <h2 class="text-base font-bold text-gray-900 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h12m-7 5h7"/>
+                    </svg>
+                    Formula Toolkit
+                </h2>
+                <p class="text-xs text-gray-500 mt-1">Manage formulas in bulk, import data, or search existing entries.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="{{ route('admin.formulas.all') }}" class="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition inline-flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h18M3 17h18"/>
+                    </svg>
+                    Bulk Manage
+                </a>
+                <a href="{{ route('admin.formulas.template.download') }}" class="px-4 py-2 rounded-lg border border-orange-200 text-orange-600 text-sm font-semibold hover:bg-orange-50 transition inline-flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v16h16V4H4zm4 4h8m-8 4h8m-8 4h5"/>
+                    </svg>
+                    Download Template
+                </a>
+                <form id="formula-import-form" action="{{ route('admin.formulas.import') }}" method="POST" enctype="multipart/form-data" class="inline-flex">
+                    @csrf
+                    <label for="formula-import-input" class="cursor-pointer px-4 py-2 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 transition inline-flex items-center gap-2">
+                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12"/>
+                        </svg>
+                        Import File
+                        <input type="file" name="excel_file" id="formula-import-input" accept=".csv,.xlsx,.xls" class="hidden">
+                    </label>
+                </form>
+            </div>
+        </div>
+
+        <div class="mt-6">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div class="relative flex-1">
+                    <input id="formula-search" type="text" placeholder="Search formulas by name, network, priority, or status..." class="form-input pr-10" autocomplete="off">
+                    <svg class="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 105.65 5.65a7.5 7.5 0 0010.6 10.6z"/>
+                    </svg>
+                </div>
+                <div class="flex items-center gap-2 text-sm font-semibold text-gray-600">
+                    <span>Records:</span>
+                    <span id="formula-count" class="inline-flex items-center justify-center px-3 py-1 rounded-full bg-gray-100 text-gray-800">{{ count($formulas) }}</span>
+                </div>
+            </div>
+
+            <div class="mt-4 overflow-x-auto border border-gray-200 rounded-xl">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50 text-xs uppercase text-gray-500 font-semibold">
+                        <tr>
+                            <th class="px-4 py-3 text-left">Formula</th>
+                            <th class="px-4 py-3 text-left">Network & Service</th>
+                            <th class="px-4 py-3 text-left">Priority</th>
+                            <th class="px-4 py-3 text-left">Type</th>
+                            <th class="px-4 py-3 text-left">Value</th>
+                            <th class="px-4 py-3 text-left">Status</th>
+                            <th class="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="formula-table-body" class="divide-y divide-gray-100">
+                        <!-- Rows rendered via JavaScript -->
+                    </tbody>
+                </table>
+                <div id="formula-empty-state" class="py-6 px-4 text-center text-sm text-gray-500 hidden">
+                    <div class="flex flex-col items-center gap-2">
+                        <svg class="w-10 h-10 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6h6v6m2 4H7a2 2 0 01-2-2V7a2 2 0 012-2h5l2 2h5a2 2 0 012 2v10a2 2 0 01-2 2z"/>
+                        </svg>
+                        <p>No formulas found. Adjust your search or create a new formula.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- Formula Form -->
         <div class="lg:col-span-2">
@@ -257,12 +397,9 @@
                                 </svg>
                                 Priority <span class="required">*</span>
                             </label>
-                            <select name="priority" id="priority" class="form-select" required>
-                                <option value="">Select Priority</option>
-                                @foreach($priorities as $priority)
-                                    <option value="{{ $priority }}">{{ $priority }}</option>
-                                @endforeach
-                            </select>
+                            <input type="text" name="priority" id="priority" class="form-input" placeholder="e.g., 1st, High, P1" required>
+                            <p class="text-xs text-gray-500 mt-1">Priority must be unique. Enter any descriptive label (e.g., 1st, High).</p>
+                            <p class="text-xs text-red-500 mt-1 hidden" id="priority-error"></p>
                         </div>
                         <div class="form-group">
                             <label class="form-label">
@@ -367,7 +504,7 @@
                     </div>
                     <div class="flex items-start gap-2">
                         <div class="w-1.5 h-1.5 rounded-full bg-purple-600 mt-1.5 flex-shrink-0"></div>
-                        <span>Priority: 1st, 2nd, 3rd, or 4th</span>
+                        <span>Priority must be unique (e.g., 1st, High, P1)</span>
                     </div>
                     <div class="flex items-start gap-2">
                         <div class="w-1.5 h-1.5 rounded-full bg-purple-600 mt-1.5 flex-shrink-0"></div>
@@ -389,6 +526,17 @@
         const networkSelect = document.getElementById('network');
         const serviceSelect = document.getElementById('service');
         const services = @json($services);
+        const formulasData = @json($formulaSummaries);
+        const priorityInput = document.getElementById('priority');
+        const priorityError = document.getElementById('priority-error');
+        const existingPriorities = @json($existingPriorities);
+        const formulaTableBody = document.getElementById('formula-table-body');
+        const formulaEmptyState = document.getElementById('formula-empty-state');
+        const formulaCountBadge = document.getElementById('formula-count');
+        const formulaSearchInput = document.getElementById('formula-search');
+        const importForm = document.getElementById('formula-import-form');
+        const importInput = document.getElementById('formula-import-input');
+        const editRouteTemplate = @json(route('admin.formulas.edit', ['id' => '__ID__']));
 
         // Populate services when network changes
         function populateServices() {
@@ -441,9 +589,170 @@
             document.getElementById('statusLabel').textContent = this.checked ? 'Active' : 'Inactive';
         });
 
+        function showPriorityError(message) {
+            if (!priorityError) {
+                alert(message);
+                return;
+            }
+            priorityError.textContent = message;
+            priorityError.classList.remove('hidden');
+        }
+
+        function clearPriorityError() {
+            if (!priorityError) {
+                return;
+            }
+            priorityError.textContent = '';
+            priorityError.classList.add('hidden');
+        }
+
+        if (priorityInput) {
+            priorityInput.addEventListener('input', clearPriorityError);
+        }
+
+        if (importInput && importForm) {
+            importInput.addEventListener('change', () => {
+                if (importInput.files && importInput.files.length > 0) {
+                    importForm.submit();
+                }
+            });
+        }
+
+        function formatFormulaValue(value) {
+            if (value === null || value === undefined || value === '') {
+                return '-';
+            }
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric.toFixed(2) : value;
+        }
+
+        function renderFormulaTable(filterTerm = '') {
+            if (!formulaTableBody || !formulaEmptyState) {
+                return;
+            }
+
+            const term = (filterTerm || '').toLowerCase();
+            const filtered = (formulasData || []).filter(item => {
+                if (!term) {
+                    return true;
+                }
+
+                return [
+                    item.formula_name,
+                    item.network,
+                    item.service,
+                    item.priority,
+                    item.type,
+                    item.scope,
+                    item.status,
+                ].some(field => (field || '').toString().toLowerCase().includes(term));
+            });
+
+            formulaTableBody.innerHTML = '';
+            const hasResults = filtered.length > 0;
+
+            if (formulaCountBadge) {
+                formulaCountBadge.textContent = filtered.length;
+            }
+
+            if (!hasResults) {
+                formulaEmptyState.classList.remove('hidden');
+                return;
+            }
+
+            formulaEmptyState.classList.add('hidden');
+
+            filtered.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50 transition-colors';
+
+                const formulaCell = document.createElement('td');
+                formulaCell.className = 'px-4 py-3 text-gray-900 font-semibold';
+                formulaCell.textContent = item.formula_name || 'Untitled';
+                tr.appendChild(formulaCell);
+
+                const networkCell = document.createElement('td');
+                networkCell.className = 'px-4 py-3 text-gray-600';
+               networkCell.innerHTML = `
+                    <div class="flex flex-col">
+                        <span>${item.network || '-'}</span>
+                        <span class="text-xs text-gray-400">${item.service || '-'}</span>
+                    </div>
+                `;
+                tr.appendChild(networkCell);
+
+                const priorityCell = document.createElement('td');
+                priorityCell.className = 'px-4 py-3 text-gray-600';
+                priorityCell.textContent = item.priority || '-';
+                tr.appendChild(priorityCell);
+
+                const typeCell = document.createElement('td');
+                typeCell.className = 'px-4 py-3 text-gray-600';
+                typeCell.innerHTML = `
+                    <div class="flex flex-col">
+                        <span>${item.type || '-'}</span>
+                        <span class="text-xs text-gray-400">${item.scope || '-'}</span>
+                    </div>
+                `;
+                tr.appendChild(typeCell);
+
+                const valueCell = document.createElement('td');
+                valueCell.className = 'px-4 py-3 text-gray-600';
+                valueCell.textContent = formatFormulaValue(item.value);
+                tr.appendChild(valueCell);
+
+                const statusCell = document.createElement('td');
+                statusCell.className = 'px-4 py-3';
+                const status = (item.status || 'Inactive').toLowerCase();
+                const statusClasses = status === 'active'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-gray-100 text-gray-600';
+                statusCell.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-semibold ${statusClasses}">${item.status || 'Inactive'}</span>`;
+                tr.appendChild(statusCell);
+
+                const actionCell = document.createElement('td');
+                actionCell.className = 'px-4 py-3 text-right';
+                if (item.id) {
+                    const editLink = document.createElement('a');
+                    editLink.href = editRouteTemplate.replace('__ID__', item.id);
+                    editLink.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition';
+                    editLink.innerHTML = `
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                        </svg>
+                        Edit
+                    `;
+                    actionCell.appendChild(editLink);
+                } else {
+                    actionCell.innerHTML = '<span class="text-xs text-gray-400">Not editable</span>';
+                }
+                tr.appendChild(actionCell);
+
+                formulaTableBody.appendChild(tr);
+            });
+        }
+
+        renderFormulaTable();
+
+        if (formulaSearchInput) {
+            formulaSearchInput.addEventListener('input', (event) => {
+                renderFormulaTable(event.target.value);
+            });
+        }
+
         // Form submission with AJAX and success popup
         document.getElementById('formulaForm').addEventListener('submit', async function(e) {
             e.preventDefault();
+            clearPriorityError();
+
+            if (priorityInput) {
+                const normalizedPriority = (priorityInput.value || '').trim().toLowerCase();
+                if (normalizedPriority && existingPriorities.includes(normalizedPriority)) {
+                    showPriorityError('This priority already exists. Please choose a different value.');
+                    priorityInput.focus();
+                    return;
+                }
+            }
             
             const form = this;
             const formData = new FormData(form);
@@ -514,13 +823,35 @@
                 } else {
                     // Show error message
                     const errorMsg = data.message || 'Error creating formula. Please try again.';
+                    let handled = false;
+
                     if (data.errors) {
-                        // Display validation errors
+                        const priorityErrors = data.errors.priority || data.errors['priority'];
+                        if (priorityErrors && priorityErrors.length > 0) {
+                            showPriorityError(priorityErrors[0]);
+                            if (priorityInput) {
+                                priorityInput.focus();
+                            }
+                            handled = true;
+                        }
+                        if (!handled) {
                         const errorList = Object.values(data.errors).flat().join('\n');
                         alert(errorMsg + '\n\n' + errorList);
+                            handled = true;
+                        }
+                    }
+
+                    if (!handled) {
+                        if (errorMsg.toLowerCase().includes('priority')) {
+                            showPriorityError(errorMsg);
+                            if (priorityInput) {
+                                priorityInput.focus();
+                            }
                     } else {
                         alert(errorMsg);
+                        }
                     }
+
                     submitButton.disabled = false;
                     buttonText.textContent = originalText;
                 }

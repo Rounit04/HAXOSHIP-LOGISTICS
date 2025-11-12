@@ -7,6 +7,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ErrorController;
 use App\Http\Controllers\FrontendController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\File;
 
 Route::get('/', [FrontendController::class, 'home'])->name('home');
 Route::view('/pricing', 'pricing')->name('pricing');
@@ -232,6 +233,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::post('/awb-upload', [AdminController::class, 'storeAwbUpload'])->name('awb-upload.store');
     Route::post('/awb-upload/bulk', [AdminController::class, 'bulkUploadAwbUpload'])->name('awb-upload.bulk');
     Route::post('/awb-upload/bulk-delete', [AdminController::class, 'bulkDeleteAwbUpload'])->name('awb-upload.bulk-delete');
+    Route::get('/awb-upload/template/download', [AdminController::class, 'downloadAwbUploadTemplate'])->name('awb-upload.template.download');
     Route::get('/awb-upload/{id}/edit', [AdminController::class, 'editAwbUpload'])->name('awb-upload.edit');
     Route::put('/awb-upload/{id}', [AdminController::class, 'updateAwbUpload'])->name('awb-upload.update');
     Route::delete('/awb-upload/{id}', [AdminController::class, 'deleteAwbUpload'])->name('awb-upload.delete');
@@ -290,6 +292,8 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::get('/reports/network/export', [AdminController::class, 'exportNetworkReport'])->name('reports.network.export');
     Route::get('/reports/service/export', [AdminController::class, 'exportServiceReport'])->name('reports.service.export');
     Route::get('/reports/country/export', [AdminController::class, 'exportCountryReport'])->name('reports.country.export');
+    Route::get('/reports/bank/export', [AdminController::class, 'exportBankReport'])->name('reports.bank.export');
+    Route::get('/reports/wallet/export', [AdminController::class, 'exportWalletReport'])->name('reports.wallet.export');
     Route::get('/reports/transaction', [AdminController::class, 'transactionReport'])->name('reports.transaction');
     Route::get('/reports/transaction/export', [AdminController::class, 'exportTransactionReport'])->name('reports.transaction.export');
     Route::get('/reports/network', [AdminController::class, 'networkReport'])->name('reports.network');
@@ -300,6 +304,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::get('/banks', [AdminController::class, 'banks'])->name('banks');
     Route::get('/banks/create', [AdminController::class, 'createBank'])->name('banks.create');
     Route::get('/banks/all', [AdminController::class, 'allBanks'])->name('banks.all');
+    Route::post('/banks/bulk-delete', [AdminController::class, 'bulkDeleteBanks'])->name('banks.bulk-delete');
     Route::post('/banks', [AdminController::class, 'storeBank'])->name('banks.store');
     Route::get('/banks/{id}/edit', [AdminController::class, 'editBank'])->name('banks.edit');
     Route::put('/banks/{id}', [AdminController::class, 'updateBank'])->name('banks.update');
@@ -359,5 +364,26 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
         Route::get('/poll/reminders', [AdminTodoController::class, 'pollReminders'])->name('poll-reminders');
     });
 });
+
+/**
+ * Serve files stored in storage/app/public when symbolic links are not available.
+ */
+Route::get('/storage/{path}', function (string $path) {
+    $relativePath = rawurldecode($path);
+    $relativePath = ltrim($relativePath, '/');
+
+    $storageBasePath = storage_path('app/public');
+    $targetPath = realpath($storageBasePath . DIRECTORY_SEPARATOR . $relativePath);
+
+    if ($targetPath === false || !str_starts_with($targetPath, $storageBasePath)) {
+        abort(404);
+    }
+
+    if (!File::exists($targetPath)) {
+        abort(404);
+    }
+
+    return response()->file($targetPath);
+})->where('path', '.*');
 
 Route::fallback([ErrorController::class, 'notFound']);

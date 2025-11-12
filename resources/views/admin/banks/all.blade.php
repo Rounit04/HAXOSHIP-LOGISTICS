@@ -269,23 +269,23 @@
                         @foreach($banks as $bank)
                             <tr>
                                 <td>
-                                    <input type="checkbox" name="selected_ids[]" value="{{ $bank->id }}" class="row-checkbox w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500" onchange="updateBulkDeleteBtn()">
+                                    <input type="checkbox" name="selected_ids[]" value="{{ $bank['id'] }}" class="row-checkbox w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500" onchange="updateBulkDeleteBtn()">
                                 </td>
-                                <td class="font-bold text-gray-900">#{{ $bank->id }}</td>
-                                <td class="font-semibold text-gray-700">{{ $bank->bank_name }}</td>
-                                <td>{{ $bank->account_holder_name }}</td>
-                                <td>{{ $bank->account_number }}</td>
-                                <td><span class="badge">{{ $bank->ifsc_code }}</span></td>
-                                <td><span class="amount-badge">₹{{ number_format($bank->opening_balance, 2) }}</span></td>
+                                <td class="font-bold text-gray-900">#{{ $bank['id'] }}</td>
+                                <td class="font-semibold text-gray-700">{{ $bank['bank_name'] }}</td>
+                                <td>{{ $bank['account_holder_name'] }}</td>
+                                <td>{{ $bank['account_number'] }}</td>
+                                <td><span class="badge">{{ $bank['ifsc_code'] }}</span></td>
+                                <td><span class="amount-badge">₹{{ number_format($bank['opening_balance'] ?? 0, 2) }}</span></td>
                                 <td>
                                     <div class="flex items-center gap-2">
-                                        <a href="{{ route('admin.banks.edit', $bank->id) }}" class="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition text-xs flex items-center gap-1.5">
+                                        <a href="{{ route('admin.banks.edit', $bank['id']) }}" class="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition text-xs flex items-center gap-1.5">
                                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                                             </svg>
                                             Edit
                                         </a>
-                                        <form method="POST" action="{{ route('admin.banks.delete', $bank->id) }}" class="inline" onsubmit="return confirm('Are you sure you want to delete this bank?');">
+                                        <form method="POST" action="{{ route('admin.banks.delete', $bank['id']) }}" class="inline" onsubmit="return confirm('Are you sure you want to delete this bank?');">
                                             @csrf
                                             @method('DELETE')
                                             <button type="submit" class="px-3 py-1.5 rounded-lg border border-red-300 text-red-700 font-semibold hover:bg-red-50 transition text-xs flex items-center gap-1.5">

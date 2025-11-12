@@ -2,6 +2,16 @@
 
 @section('title', 'Edit Formula')
 
+@php
+    $normalizedPriorities = array_values(array_filter(array_unique(array_map(function ($priority) {
+        return strtolower(trim($priority ?? ''));
+    }, array_column($formulas, 'priority')))));
+    $currentPriorityNormalized = strtolower(trim($formula['priority'] ?? ''));
+    $otherPriorities = array_values(array_filter($normalizedPriorities, function ($priority) use ($currentPriorityNormalized) {
+        return $priority !== '' && $priority !== $currentPriorityNormalized;
+    }));
+@endphp
+
 @section('content')
     <style>
         .page-header {
@@ -281,12 +291,9 @@
                                 </svg>
                                 Priority <span class="required">*</span>
                             </label>
-                            <select name="priority" id="priority" class="form-select" required>
-                                <option value="">Select Priority</option>
-                                @foreach($priorities as $priority)
-                                    <option value="{{ $priority }}" {{ $formula['priority'] == $priority ? 'selected' : '' }}>{{ $priority }}</option>
-                                @endforeach
-                            </select>
+                            <input type="text" name="priority" id="priority" class="form-input" value="{{ $formula['priority'] }}" placeholder="e.g., 1st, High, P1" required>
+                            <p class="text-xs text-gray-500 mt-1">Priority must be unique. Enter any descriptive label (e.g., 1st, High).</p>
+                            <p class="text-xs text-red-500 mt-1 hidden" id="priority-error"></p>
                         </div>
                         <div class="form-group">
                             <label class="form-label">
@@ -418,6 +425,9 @@
         const networkSelect = document.getElementById('network');
         const serviceSelect = document.getElementById('service');
         const services = @json($services);
+        const priorityInput = document.getElementById('priority');
+        const priorityError = document.getElementById('priority-error');
+        const existingPriorities = @json($otherPriorities);
         const currentNetwork = '{{ $formula['network'] ?? '' }}';
         const currentService = '{{ $formula['service'] ?? '' }}';
 
@@ -485,9 +495,40 @@
             document.getElementById('statusLabel').textContent = this.checked ? 'Active' : 'Inactive';
         });
 
+        function showPriorityError(message) {
+            if (!priorityError) {
+                alert(message);
+                return;
+            }
+            priorityError.textContent = message;
+            priorityError.classList.remove('hidden');
+        }
+
+        function clearPriorityError() {
+            if (!priorityError) {
+                return;
+            }
+            priorityError.textContent = '';
+            priorityError.classList.add('hidden');
+        }
+
+        if (priorityInput) {
+            priorityInput.addEventListener('input', clearPriorityError);
+        }
+
         // Form submission with AJAX and success popup
         document.getElementById('formulaForm').addEventListener('submit', async function(e) {
             e.preventDefault();
+            clearPriorityError();
+
+            if (priorityInput) {
+                const normalizedPriority = (priorityInput.value || '').trim().toLowerCase();
+                if (normalizedPriority && existingPriorities.includes(normalizedPriority)) {
+                    showPriorityError('This priority already exists. Please choose a different value.');
+                    priorityInput.focus();
+                    return;
+                }
+            }
             
             const form = this;
             const formData = new FormData(form);
@@ -576,13 +617,36 @@
                 } else {
                     // Show error message
                     const errorMsg = data.message || 'Error updating formula. Please try again.';
+                    let handled = false;
+
                     if (data.errors) {
-                        // Display validation errors
+                        const priorityErrors = data.errors.priority || data.errors['priority'];
+                        if (priorityErrors && priorityErrors.length > 0) {
+                            showPriorityError(priorityErrors[0]);
+                            if (priorityInput) {
+                                priorityInput.focus();
+                            }
+                            handled = true;
+                        }
+
+                        if (!handled) {
                         const errorList = Object.values(data.errors).flat().join('\n');
                         alert(errorMsg + '\n\n' + errorList);
+                            handled = true;
+                        }
+                    }
+
+                    if (!handled) {
+                        if (errorMsg.toLowerCase().includes('priority')) {
+                            showPriorityError(errorMsg);
+                            if (priorityInput) {
+                                priorityInput.focus();
+                            }
                     } else {
                         alert(errorMsg);
+                        }
                     }
+
                     submitButton.disabled = false;
                     buttonText.textContent = originalText;
                 }

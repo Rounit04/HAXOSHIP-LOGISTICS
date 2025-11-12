@@ -3,57 +3,92 @@
 @section('title', 'Todo Reminders')
 
 @section('content')
+<style>
+    .todo-input {
+        border: 2px solid #e5e7eb;
+        background: #ffffff;
+    }
+    .todo-input:focus {
+        border-color: #FF750F;
+        box-shadow: 0 0 0 4px rgba(255, 117, 15, 0.1);
+        background: #fff5ed;
+    }
+    .todo-item-card {
+        border-left: 6px solid #FF750F;
+        background: #fff5ed;
+        border: 2px solid #FF750F;
+        transition: all 0.2s ease;
+    }
+    .todo-item-card:hover {
+        background: #fff0e6;
+        box-shadow: 0 4px 12px rgba(255, 117, 15, 0.2);
+        border-color: #ff8c3a;
+    }
+    .todo-item-completed {
+        border-left-color: #10b981;
+        background: #f0fdf4;
+        border-color: #10b981;
+    }
+    .todo-item-completed:hover {
+        background: #ecfdf5;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+    }
+    .section-header {
+        background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+        border-bottom: 2px solid #e5e7eb;
+    }
+</style>
 <div class="p-6 lg:p-10 space-y-6">
-    <div class="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
-        <div class="bg-gradient-to-r from-orange-500 via-orange-400 to-orange-500 px-6 py-8 text-white">
+    <div class="bg-white rounded-3xl shadow-lg border-2 border-gray-200 overflow-hidden">
+        <div class="bg-orange-500 px-6 py-8 text-white">
             <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
                 <div>
                     <p class="text-sm uppercase tracking-widest text-orange-100 font-semibold">Stay On Track</p>
                     <h1 class="text-3xl font-extrabold mt-2">Personal Todo & Reminder Board</h1>
                     <p class="text-orange-100 mt-3 max-w-2xl">
-                        Capture quick notes, attach reminders, and get notified automatically when it’s time.
+                        Capture quick notes, attach reminders, and get notified automatically when it's time.
                     </p>
                 </div>
                 <div class="flex items-center gap-6">
-                    <div class="bg-white/10 rounded-2xl px-6 py-4 text-center backdrop-blur">
-                        <p class="text-sm text-orange-100">Pending</p>
-                        <p class="text-2xl font-bold">{{ $pendingCount }}</p>
+                    <div class="bg-white/20 rounded-2xl px-6 py-4 text-center backdrop-blur border border-white/30">
+                        <p class="text-sm text-orange-100 font-semibold">Pending</p>
+                        <p class="text-3xl font-bold text-white">{{ $pendingCount }}</p>
                     </div>
-                    <div class="bg-white/10 rounded-2xl px-6 py-4 text-center backdrop-blur">
-                        <p class="text-sm text-orange-100">Completed</p>
-                        <p class="text-2xl font-bold">{{ $completedCount }}</p>
+                    <div class="bg-white/20 rounded-2xl px-6 py-4 text-center backdrop-blur border border-white/30">
+                        <p class="text-sm text-orange-100 font-semibold">Completed</p>
+                        <p class="text-3xl font-bold text-white">{{ $completedCount }}</p>
                     </div>
                 </div>
             </div>
         </div>
-        <div class="p-6 lg:p-8">
-            <div id="todo-alert" class="hidden rounded-xl border px-4 py-3 mb-6 text-sm font-semibold"></div>
+        <div class="p-6 lg:p-8 bg-gray-50">
+            <div id="todo-alert" class="hidden rounded-xl border-2 px-4 py-3 mb-6 text-sm font-semibold"></div>
             <form id="todo-form" class="grid gap-6 lg:grid-cols-12">
                 <div class="lg:col-span-5 space-y-3">
-                    <label for="todo-title" class="text-sm font-semibold text-gray-700">Title</label>
+                    <label for="todo-title" class="text-sm font-bold text-gray-800 block">Title <span class="text-red-500">*</span></label>
                     <input id="todo-title" name="title" type="text" placeholder="Give your note a clear title"
-                        class="w-full rounded-xl border-gray-200 focus:ring-2 focus:ring-orange-400 focus:border-orange-400 shadow-sm px-4 py-2.5 transition">
+                        class="todo-input w-full rounded-xl px-4 py-3 transition font-medium text-gray-900">
                 </div>
                 <div class="lg:col-span-4 space-y-3">
-                    <label for="todo-remind-at" class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <label for="todo-remind-at" class="text-sm font-bold text-gray-800 flex items-center gap-2">
                         Reminder (optional)
-                        <span class="text-xs font-medium text-gray-400">(date &amp; time)</span>
+                        <span class="text-xs font-normal text-gray-500">(date &amp; time)</span>
                     </label>
                     <input id="todo-remind-at" name="remind_at" type="datetime-local"
-                        class="w-full rounded-xl border-gray-200 focus:ring-2 focus:ring-orange-400 focus:border-orange-400 shadow-sm px-4 py-2.5 transition">
+                        class="todo-input w-full rounded-xl px-4 py-3 transition font-medium text-gray-900">
                 </div>
                 <div class="lg:col-span-12 space-y-3">
-                    <label for="todo-note" class="text-sm font-semibold text-gray-700">Quick Note</label>
+                    <label for="todo-note" class="text-sm font-bold text-gray-800 block">Quick Note</label>
                     <textarea id="todo-note" name="note" rows="4" placeholder="What do you want to remember?"
-                        class="w-full rounded-xl border-gray-200 focus:ring-2 focus:ring-orange-400 focus:border-orange-400 shadow-sm px-4 py-3 transition resize-y"></textarea>
+                        class="todo-input w-full rounded-xl px-4 py-3 transition resize-y font-medium text-gray-900"></textarea>
                 </div>
-                <div class="lg:col-span-12 flex flex-wrap gap-3 justify-end">
+                <div class="lg:col-span-12 flex flex-wrap gap-3 justify-end pt-2">
                     <button type="button" id="todo-reset-button"
-                        class="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition">
+                        class="px-5 py-2.5 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-100 hover:border-gray-400 transition">
                         Clear
                     </button>
                     <button type="submit"
-                        class="px-6 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-orange-500 to-orange-400 shadow hover:shadow-lg transition flex items-center gap-2">
+                        class="px-6 py-2.5 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-400 shadow-lg hover:shadow-xl transition flex items-center gap-2 border-2 border-orange-600">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M12 4v16m8-8H4" />
@@ -65,38 +100,81 @@
         </div>
     </div>
 
-    <div class="grid lg:grid-cols-2 gap-6">
-        <div class="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
-            <div class="px-6 py-4 border-b flex items-center justify-between">
-                <div>
-                    <h2 class="text-lg font-semibold text-gray-800">Pending</h2>
-                    <p class="text-xs text-gray-500">Items waiting for action</p>
+    <!-- Pending Section - Full Width -->
+    <div class="bg-white rounded-3xl shadow-xl border-2 border-orange-200 overflow-hidden">
+        <div class="bg-gradient-to-r from-orange-500 to-orange-400 px-6 py-6 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
                 </div>
-                <span id="pending-count-pill" class="text-xs font-semibold bg-orange-100 text-orange-600 px-3 py-1 rounded-full">{{ $pendingCount }}</span>
+                <div>
+                    <h2 class="text-2xl font-bold text-white">Pending Tasks</h2>
+                    <p class="text-sm text-orange-100 font-medium mt-1">Items waiting for your action</p>
+                </div>
             </div>
-            <ul id="todo-pending-list" class="divide-y divide-gray-100">
-                <li class="py-6 flex justify-center text-sm text-gray-400" data-empty-pending>
-                    Nothing pending yet. Add a reminder above!
+            <div class="flex items-center gap-3">
+                <span id="pending-count-pill" class="text-lg font-bold bg-white text-orange-500 px-6 py-2 rounded-full shadow-lg">{{ $pendingCount }}</span>
+            </div>
+        </div>
+        <div class="p-6 bg-gray-50 min-h-[300px]">
+            <ul id="todo-pending-list" class="space-y-4">
+                <li class="py-12 flex flex-col items-center justify-center text-sm text-gray-500 font-medium" data-empty-pending>
+                    <svg class="w-16 h-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-base">Nothing pending yet. Add a reminder above!</p>
                 </li>
             </ul>
         </div>
+    </div>
 
-        <div class="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
-            <div class="px-6 py-4 border-b flex items-center justify-between">
-                <div>
-                    <h2 class="text-lg font-semibold text-gray-800">Completed</h2>
-                    <p class="text-xs text-gray-500">Completed reminders stay here</p>
+    <!-- Completed Section - Full Width -->
+    <div class="bg-white rounded-3xl shadow-xl border-2 border-gray-300 overflow-hidden mt-6">
+        <div class="bg-gradient-to-r from-gray-600 to-gray-500 px-6 py-6 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                    </svg>
                 </div>
-                <span id="completed-count-pill" class="text-xs font-semibold bg-gray-100 text-gray-600 px-3 py-1 rounded-full">{{ $completedCount }}</span>
+                <div>
+                    <h2 class="text-2xl font-bold text-white">Completed Tasks</h2>
+                    <p class="text-sm text-gray-200 font-medium mt-1">Completed reminders stay here</p>
+                </div>
             </div>
-            <ul id="todo-completed-list" class="divide-y divide-gray-100">
-                <li class="py-6 flex justify-center text-sm text-gray-400" data-empty-completed>
-                    Marked items will appear here.
+            <div class="flex items-center gap-3">
+                <span id="completed-count-pill" class="text-lg font-bold bg-white text-gray-600 px-6 py-2 rounded-full shadow-lg">{{ $completedCount }}</span>
+            </div>
+        </div>
+        <div class="p-6 bg-gray-50 min-h-[300px]">
+            <ul id="todo-completed-list" class="space-y-4">
+                <li class="py-12 flex flex-col items-center justify-center text-sm text-gray-500 font-medium" data-empty-completed>
+                    <svg class="w-16 h-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-base">Marked items will appear here.</p>
                 </li>
             </ul>
         </div>
     </div>
 </div>
+
+@php
+    $initialTodos = $todos->map(function ($todo) {
+        return [
+            'id' => $todo->id,
+            'title' => $todo->title,
+            'note' => $todo->note,
+            'is_completed' => $todo->is_completed,
+            'remind_at_iso' => optional($todo->remind_at)->toIso8601String(),
+            'remind_at_display' => optional($todo->remind_at)->toDayDateTimeString(),
+            'completed_at_iso' => optional($todo->completed_at)->toIso8601String(),
+            'completed_at_display' => optional($todo->completed_at)->diffForHumans(),
+        ];
+    });
+@endphp
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -108,18 +186,7 @@
             destroy: id => '{{ route("admin.todos.destroy", ["id" => "__ID__"]) }}'.replace('__ID__', id),
         };
 
-        const initialTodos = @json($todos->map(function ($todo) {
-            return [
-                'id' => $todo->id,
-                'title' => $todo->title,
-                'note' => $todo->note,
-                'is_completed' => $todo->is_completed,
-                'remind_at_iso' => optional($todo->remind_at)->toIso8601String(),
-                'remind_at_display' => optional($todo->remind_at)->toDayDateTimeString(),
-                'completed_at_iso' => optional($todo->completed_at)->toIso8601String(),
-                'completed_at_display' => optional($todo->completed_at)->diffForHumans(),
-            ];
-        }));
+        const initialTodos = @json($initialTodos);
 
         function formatDateTimeLocal(value) {
             if (!value) {
@@ -294,8 +361,13 @@
 
             if (pending.length === 0) {
                 const emptyLi = document.createElement('li');
-                emptyLi.className = 'py-6 flex justify-center text-sm text-gray-400';
-                emptyLi.textContent = 'Nothing pending yet. Add a reminder above!';
+                emptyLi.className = 'py-12 flex flex-col items-center justify-center text-sm text-gray-500 font-medium';
+                emptyLi.innerHTML = `
+                    <svg class="w-16 h-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-base">Nothing pending yet. Add a reminder above!</p>
+                `;
                 pendingList.appendChild(emptyLi);
             } else {
                 pending.forEach(todo => {
@@ -305,8 +377,13 @@
 
             if (completed.length === 0) {
                 const emptyLi = document.createElement('li');
-                emptyLi.className = 'py-6 flex justify-center text-sm text-gray-400';
-                emptyLi.textContent = 'Marked items will appear here.';
+                emptyLi.className = 'py-12 flex flex-col items-center justify-center text-sm text-gray-500 font-medium';
+                emptyLi.innerHTML = `
+                    <svg class="w-16 h-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-base">Marked items will appear here.</p>
+                `;
                 completedList.appendChild(emptyLi);
             } else {
                 completed.forEach(todo => {
@@ -317,7 +394,7 @@
 
         function renderTodoItem(todo, completed = false) {
             const li = document.createElement('li');
-            li.className = 'px-6 py-5 transition hover:bg-gray-50';
+            li.className = `todo-item-card ${completed ? 'todo-item-completed' : ''} px-6 py-5 rounded-xl`;
 
             const wrapper = document.createElement('div');
             wrapper.className = 'flex flex-col gap-4';
@@ -326,27 +403,27 @@
             topRow.className = 'flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4';
 
             const textBlock = document.createElement('div');
-            textBlock.className = 'space-y-2';
+            textBlock.className = 'space-y-3 flex-1';
 
             const title = document.createElement('h3');
-            title.className = `text-base font-semibold ${completed ? 'text-gray-500 line-through' : 'text-gray-800'}`;
+            title.className = `text-lg font-bold ${completed ? 'text-gray-500 line-through' : 'text-gray-900'}`;
             title.textContent = todo.title || 'Untitled Note';
             textBlock.appendChild(title);
 
             if (todo.note) {
                 const note = document.createElement('p');
-                note.className = `text-sm leading-relaxed ${completed ? 'text-gray-400' : 'text-gray-600'}`;
+                note.className = `text-sm leading-relaxed ${completed ? 'text-gray-400' : 'text-gray-700'}`;
                 note.textContent = todo.note;
                 textBlock.appendChild(note);
             }
 
             if (todo.remind_at_display) {
                 const reminder = document.createElement('div');
-                reminder.className = 'inline-flex items-center gap-2 text-xs font-medium text-orange-600 bg-orange-100 px-3 py-1 rounded-full';
+                reminder.className = 'inline-flex items-center gap-2 text-xs font-bold text-orange-700 bg-orange-200 border border-orange-300 px-3 py-1.5 rounded-full shadow-sm';
                 reminder.innerHTML = `
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     Reminder: ${todo.remind_at_display}
                 `;
@@ -355,7 +432,7 @@
 
             if (completed && todo.completed_at_display) {
                 const completedTag = document.createElement('div');
-                completedTag.className = 'inline-flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-100 px-3 py-1 rounded-full';
+                completedTag.className = 'inline-flex items-center gap-2 text-xs font-bold text-emerald-700 bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-full shadow-sm';
                 completedTag.innerHTML = `
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -373,9 +450,9 @@
 
             const toggleButton = document.createElement('button');
             toggleButton.type = 'button';
-            toggleButton.className = `px-4 py-2 rounded-xl font-semibold text-sm transition flex items-center gap-2 ${completed
-                ? 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
-                : 'bg-emerald-500 text-white shadow hover:shadow-lg'
+            toggleButton.className = `px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 border-2 ${completed
+                ? 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 shadow-sm'
+                : 'bg-emerald-500 text-white border-emerald-600 shadow-lg hover:shadow-xl hover:bg-emerald-600'
                 }`;
             toggleButton.innerHTML = completed
                 ? `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -391,7 +468,7 @@
 
             const editButton = document.createElement('button');
             editButton.type = 'button';
-            editButton.className = 'px-4 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-100 transition flex items-center gap-2';
+            editButton.className = 'px-5 py-2.5 rounded-xl border-2 border-gray-300 text-sm font-bold text-gray-700 hover:bg-gray-100 hover:border-gray-400 transition flex items-center gap-2 shadow-sm';
             editButton.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M11 5h2m2 0h2m-6 4h6m-6 4h6m-4 4h4m-14-8h2m-2 4h2m-2 4h2m-2-8h2" />
@@ -402,7 +479,7 @@
 
             const deleteButton = document.createElement('button');
             deleteButton.type = 'button';
-            deleteButton.className = 'px-4 py-2 rounded-xl border border-red-100 text-sm font-semibold text-red-600 hover:bg-red-50 transition flex items-center gap-2';
+            deleteButton.className = 'px-5 py-2.5 rounded-xl border-2 border-red-300 text-sm font-bold text-red-700 hover:bg-red-50 hover:border-red-400 transition flex items-center gap-2 shadow-sm';
             deleteButton.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M6 18L18 6M6 6l12 12" />

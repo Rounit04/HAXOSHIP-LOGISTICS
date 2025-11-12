@@ -112,8 +112,18 @@
                     <p class="text-xs text-gray-600">Different Report according to user</p>
                 </div>
             </div>
+            @php
+                $exportParams = array_filter([
+                    'date_from' => $dateFrom ?? request('date_from'),
+                    'date_to' => $dateTo ?? request('date_to'),
+                    'hub' => $hub ?? request('hub'),
+                    'branch' => $branch ?? request('branch'),
+                    'category' => $category ?? request('category'),
+                    'search' => $search ?? request('search'),
+                ]);
+            @endphp
             <div class="flex items-center gap-3">
-                <a href="{{ route('admin.reports.booking.export') }}" class="admin-btn-primary px-5 py-2.5 text-sm font-semibold flex items-center gap-2">
+                <a href="{{ route('admin.reports.booking.export', $exportParams) }}" class="admin-btn-primary px-5 py-2.5 text-sm font-semibold flex items-center gap-2">
                     <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                     </svg>
@@ -141,6 +151,51 @@
             <div class="text-sm text-gray-600 font-medium">
                 Total: <span class="font-bold text-orange-600">{{ count($bookings) + count($directEntryBookings) }}</span> Bookings
             </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
+            <form method="GET" action="{{ route('admin.reports.booking') }}" class="flex flex-wrap items-end gap-3">
+                <div>
+                    <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">From</label>
+                    <input type="date" name="date_from" class="form-input" value="{{ $dateFrom ?? request('date_from') }}">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">To</label>
+                    <input type="date" name="date_to" class="form-input" value="{{ $dateTo ?? request('date_to') }}">
+                </div>
+                @if(isset($hubs) && count($hubs) > 0)
+                <div>
+                    <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Hub</label>
+                    <select name="hub" id="hubSelect" class="form-select" onchange="updateBranches()">
+                        <option value="">All Hubs</option>
+                        @foreach($hubs as $hubItem)
+                            <option value="{{ $hubItem }}" {{ ($hub ?? '') == $hubItem ? 'selected' : '' }}>{{ $hubItem }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                @endif
+                @if(isset($branches) && count($branches) > 0)
+                <div>
+                    <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Branch</label>
+                    <select name="branch" id="branchSelect" class="form-select">
+                        <option value="">All Branches</option>
+                        @foreach($branches as $branchItem)
+                            <option value="{{ $branchItem }}" {{ ($branch ?? '') == $branchItem ? 'selected' : '' }}>{{ $branchItem }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                @endif
+                <div class="flex items-center gap-2">
+                    <button type="submit" class="admin-btn-primary px-4 py-2 text-sm font-semibold">
+                        Filter
+                    </button>
+                    @if(($dateFrom ?? request('date_from')) || ($dateTo ?? request('date_to')) || ($hub ?? request('hub')) || ($branch ?? request('branch')))
+                        <a href="{{ route('admin.reports.booking') }}" class="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition">
+                            Reset
+                        </a>
+                    @endif
+                </div>
+            </form>
         </div>
 
         <div class="overflow-x-auto rounded-lg border border-gray-200 printable-table">
@@ -207,6 +262,18 @@
         function printReportTable() {
             window.print();
         }
+
+        @if(isset($hubs) && isset($branches))
+        function updateBranches() {
+            const hubSelect = document.getElementById('hubSelect');
+            const branchSelect = document.getElementById('branchSelect');
+            const selectedHub = hubSelect.value;
+            
+            // Get branches for the selected hub via AJAX or filter client-side
+            // For now, we'll keep all branches visible since the server handles filtering
+            // This can be enhanced with AJAX to fetch branches dynamically
+        }
+        @endif
     </script>
 @endsection
 

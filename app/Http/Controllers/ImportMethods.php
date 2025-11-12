@@ -12,9 +12,8 @@ use App\Imports\BanksImport;
 use App\Models\Network;
 use App\Models\BookingCategory;
 use Maatwebsite\Excel\Facades\Excel;
-use Maatwebsite\Excel\Concerns\FromArray;
-use Maatwebsite\Excel\Concerns\WithHeadings;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 trait ImportMethods
 {
@@ -96,6 +95,27 @@ trait ImportMethods
         }
     }
 
+    protected function downloadCsvTemplate(array $headers, array $rows, string $filename): StreamedResponse
+    {
+        $filename = str_ends_with($filename, '.csv') ? $filename : "{$filename}.csv";
+
+        return response()->streamDownload(function () use ($headers, $rows) {
+            $handle = fopen('php://output', 'w');
+
+            // Add UTF-8 BOM for Excel compatibility
+            fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+
+            fputcsv($handle, $headers);
+            foreach ($rows as $row) {
+                fputcsv($handle, $row);
+            }
+
+            fclose($handle);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
     public function downloadNetworkTemplate()
     {
         $headers = ['Network Name', 'Network Type', 'Opening Balance', 'Status', 'Bank Details', 'Remark'];
@@ -104,25 +124,15 @@ trait ImportMethods
             ['FedEx', 'International', '5000', 'Active', '', 'International network'],
         ];
         
-        return Excel::download(new class($data, $headers) implements FromArray, WithHeadings {
-            protected $data; protected $headers;
-            public function __construct($data, $headers) { $this->data = $data; $this->headers = $headers; }
-            public function array(): array { return $this->data; }
-            public function headings(): array { return $this->headers; }
-        }, 'networks_template.xlsx');
+        return $this->downloadCsvTemplate($headers, $data, 'networks_template.csv');
     }
 
     public function downloadServiceTemplate()
     {
         $headers = ['Service Name', 'Network', 'Transit Time', 'Items Allowed', 'Status', 'Remark', 'Display Title', 'Description', 'Icon Type', 'Is Highlighted'];
         $data = [['Express', 'DTDC', '24-48 Hours', 'Documents, Small Packages', 'Active', 'Fast delivery', 'Express Delivery', 'Fast and reliable', 'truck', 'No']];
-        
-        return Excel::download(new class($data, $headers) implements FromArray, WithHeadings {
-            protected $data; protected $headers;
-            public function __construct($data, $headers) { $this->data = $data; $this->headers = $headers; }
-            public function array(): array { return $this->data; }
-            public function headings(): array { return $this->headers; }
-        }, 'services_template.xlsx');
+
+        return $this->downloadCsvTemplate($headers, $data, 'services_template.csv');
     }
 
     public function downloadCountryTemplate()
@@ -133,12 +143,7 @@ trait ImportMethods
             ['USA', 'US', '+1', '1', 'Active', ''],
         ];
         
-        return Excel::download(new class($data, $headers) implements FromArray, WithHeadings {
-            protected $data; protected $headers;
-            public function __construct($data, $headers) { $this->data = $data; $this->headers = $headers; }
-            public function array(): array { return $this->data; }
-            public function headings(): array { return $this->headers; }
-        }, 'countries_template.xlsx');
+        return $this->downloadCsvTemplate($headers, $data, 'countries_template.csv');
     }
 
     public function downloadZoneTemplate()
@@ -149,12 +154,7 @@ trait ImportMethods
             ['400001', 'India', 'Zone B', 'FedEx', 'Economy', 'Active', ''],
         ];
         
-        return Excel::download(new class($data, $headers) implements FromArray, WithHeadings {
-            protected $data; protected $headers;
-            public function __construct($data, $headers) { $this->data = $data; $this->headers = $headers; }
-            public function array(): array { return $this->data; }
-            public function headings(): array { return $this->headers; }
-        }, 'zones_template.xlsx');
+        return $this->downloadCsvTemplate($headers, $data, 'zones_template.csv');
     }
 
     public function importBookingCategories(Request $request)
@@ -187,12 +187,7 @@ trait ImportMethods
             ['Support Category 1', 'support', 'No', 'Active'],
         ];
         
-        return Excel::download(new class($data, $headers) implements FromArray, WithHeadings {
-            protected $data; protected $headers;
-            public function __construct($data, $headers) { $this->data = $data; $this->headers = $headers; }
-            public function array(): array { return $this->data; }
-            public function headings(): array { return $this->headers; }
-        }, 'booking_categories_template.xlsx');
+        return $this->downloadCsvTemplate($headers, $data, 'booking_categories_template.csv');
     }
 
     public function importShippingCharges(Request $request)
@@ -222,12 +217,7 @@ trait ImportMethods
             ['India', 'Zone A', 'USA', 'Zone 1', 'Non-Dox', '1', '5', 'FedEx', 'Economy', '500', ''],
         ];
         
-        return Excel::download(new class($data, $headers) implements FromArray, WithHeadings {
-            protected $data; protected $headers;
-            public function __construct($data, $headers) { $this->data = $data; $this->headers = $headers; }
-            public function array(): array { return $this->data; }
-            public function headings(): array { return $this->headers; }
-        }, 'shipping_charges_template.xlsx');
+        return $this->downloadCsvTemplate($headers, $data, 'shipping_charges_template.csv');
     }
 
     public function importBanks(Request $request)
@@ -257,12 +247,7 @@ trait ImportMethods
             ['ICICI Bank', 'Haxo Shipping Pvt Ltd', '987654321098', 'ICIC0005678', '75000'],
         ];
         
-        return Excel::download(new class($data, $headers) implements FromArray, WithHeadings {
-            protected $data; protected $headers;
-            public function __construct($data, $headers) { $this->data = $data; $this->headers = $headers; }
-            public function array(): array { return $this->data; }
-            public function headings(): array { return $this->headers; }
-        }, 'banks_template.xlsx');
+        return $this->downloadCsvTemplate($headers, $data, 'banks_template.csv');
     }
 
     public function downloadFormulaTemplate()
@@ -273,12 +258,34 @@ trait ImportMethods
             ['Weight Based Charge', 'Blue Dart', 'Economy', 'Percentage', 'per kg', '2nd', '10.5', 'Active', '10.5% per kg'],
         ];
         
-        return Excel::download(new class($data, $headers) implements FromArray, WithHeadings {
-            protected $data; protected $headers;
-            public function __construct($data, $headers) { $this->data = $data; $this->headers = $headers; }
-            public function array(): array { return $this->data; }
-            public function headings(): array { return $this->headers; }
-        }, 'formulas_template.xlsx');
+        return $this->downloadCsvTemplate($headers, $data, 'formulas_template.csv');
+    }
+
+    public function downloadAwbUploadTemplate()
+    {
+        $headers = [
+            '1', '1', '1', '1', '1', '1', '1', '1', '1', '1',
+            '1', '1', '1', '1', '1', '1', '1', '1', '1', '0',
+            '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
+        ];
+
+        $data = [
+            [
+                'awb_no', 'type', 'origin', 'origin_zone', 'origin_zone_pincode', 'destination', 'destination_zone',
+                'destination_zone_pincode', 'consignor', 'consignee', 'consignor_attn', 'consignee_attn', 'pk',
+                'actual_weight', 'volumetric_weight', 'chargeable_weight', 'network_name', 'service_name', 'amount',
+                'date_of_sale', 'goods_type', 'remark', 'forwardNumber', 'transfer', 'transferOn', 'remark_1',
+                'remark_2', 'remark_3', 'remark_4', 'remark_5'
+            ],
+            [
+                'AWB123456789', 'Domestic', 'India', 'Zone 1', '400001', 'United States', 'Zone 2', '10001',
+                'Haxo Shipping Pvt Ltd', 'John Doe', 'Ms. Anita', 'Mr. John', '1', '0.50', '0.65', '0.65',
+                'DTDC', 'Express', '150.00', '2025-01-15', 'Electronics', 'Handle with care', 'FW12345', 'No',
+                '2025-01-16', 'Remark 1', 'Remark 2', 'Remark 3', 'Remark 4', 'Remark 5'
+            ],
+        ];
+
+        return $this->downloadCsvTemplate($headers, $data, 'awb_upload_template.csv');
     }
 
     public function importFormulas(Request $request)

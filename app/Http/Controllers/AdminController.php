@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\FrontendSetting;
+use App\Models\Bank;
 use App\Models\BookingCategory;
 use App\Models\Blog;
 use App\Models\Notification;
@@ -35,6 +36,9 @@ use Maatwebsite\Excel\Concerns\WithHeadings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 
 class AdminController extends Controller
 {
@@ -208,31 +212,43 @@ class AdminController extends Controller
         // Handle logo upload
         if ($request->hasFile('logo')) {
             // Delete old logo if exists
-            if ($settings->logo && Storage::disk('public')->exists($settings->logo)) {
-                Storage::disk('public')->delete($settings->logo);
+            if ($settings->logo) {
+                if (Storage::disk('public')->exists($settings->logo)) {
+                    Storage::disk('public')->delete($settings->logo);
+                }
+                $this->deleteMirroredPublicFile($settings->logo);
             }
             $logoPath = $request->file('logo')->store('frontend', 'public');
             $settings->logo = $logoPath;
+            $this->mirrorFileToPublicStorage($logoPath);
         }
 
         // Handle banner upload
         if ($request->hasFile('banner')) {
             // Delete old banner if exists
-            if ($settings->banner && Storage::disk('public')->exists($settings->banner)) {
-                Storage::disk('public')->delete($settings->banner);
+            if ($settings->banner) {
+                if (Storage::disk('public')->exists($settings->banner)) {
+                    Storage::disk('public')->delete($settings->banner);
+                }
+                $this->deleteMirroredPublicFile($settings->banner);
             }
             $bannerPath = $request->file('banner')->store('frontend', 'public');
             $settings->banner = $bannerPath;
+            $this->mirrorFileToPublicStorage($bannerPath);
         }
 
         // Handle footer logo upload
         if ($request->hasFile('footer_logo')) {
             // Delete old footer logo if exists
-            if ($settings->footer_logo && Storage::disk('public')->exists($settings->footer_logo)) {
-                Storage::disk('public')->delete($settings->footer_logo);
+            if ($settings->footer_logo) {
+                if (Storage::disk('public')->exists($settings->footer_logo)) {
+                    Storage::disk('public')->delete($settings->footer_logo);
+                }
+                $this->deleteMirroredPublicFile($settings->footer_logo);
             }
             $footerLogoPath = $request->file('footer_logo')->store('frontend', 'public');
             $settings->footer_logo = $footerLogoPath;
+            $this->mirrorFileToPublicStorage($footerLogoPath);
         }
 
         // Update other settings
@@ -1113,6 +1129,10 @@ class AdminController extends Controller
             // Find network in database
             $network = Network::findOrFail($id);
             
+            // Store old network name for cascading updates
+            $oldNetworkName = $network->name;
+            $newNetworkName = $request->network_name;
+            
             // Keep opening balance fixed - do not update it
             $openingBalance = $network->opening_balance;
             
@@ -1146,7 +1166,7 @@ class AdminController extends Controller
             
             // Update network in database (opening balance is kept fixed)
             $network->update([
-                'name' => $request->network_name,
+                'name' => $newNetworkName,
                 'type' => $request->network_type,
                 'opening_balance' => $openingBalance, // Keep original opening balance
                 'status' => $status,
@@ -1155,17 +1175,91 @@ class AdminController extends Controller
                 'remark' => $request->remark ?? '',
             ]);
             
+            // Cascade update: Update all related records if network name changed
+            if ($oldNetworkName !== $newNetworkName) {
+                // Update AwbUploads in database
+                \DB::table('awb_uploads')
+                    ->where('network_name', $oldNetworkName)
+                    ->update(['network_name' => $newNetworkName]);
+                
+                // Update Services in session
+                $services = $this->getServices();
+                if (is_array($services)) {
+                    $services = array_map(function($service) use ($oldNetworkName, $newNetworkName) {
+                        if (isset($service['network']) && $service['network'] === $oldNetworkName) {
+                            $service['network'] = $newNetworkName;
+                        }
+                        return $service;
+                    }, $services);
+                    session(['services' => array_values($services)]);
+                }
+                
+                // Update Bookings in session
+                $bookings = $this->getBookings();
+                if (is_array($bookings)) {
+                    $bookings = array_map(function($booking) use ($oldNetworkName, $newNetworkName) {
+                        if (isset($booking['network']) && $booking['network'] === $oldNetworkName) {
+                            $booking['network'] = $newNetworkName;
+                        }
+                        return $booking;
+                    }, $bookings);
+                    session(['bookings' => array_values($bookings)]);
+                }
+                
+                // Update Direct Entry Bookings in session
+                if (session()->has('direct_entry_bookings')) {
+                    $directEntryBookings = session('direct_entry_bookings');
+                    if (is_array($directEntryBookings)) {
+                        $directEntryBookings = array_map(function($booking) use ($oldNetworkName, $newNetworkName) {
+                            if (isset($booking['network']) && $booking['network'] === $oldNetworkName) {
+                                $booking['network'] = $newNetworkName;
+                            }
+                            return $booking;
+                        }, $directEntryBookings);
+                        session(['direct_entry_bookings' => array_values($directEntryBookings)]);
+                    }
+                }
+                
+                // Update Shipping Charges in session
+                if (session()->has('shipping_charges')) {
+                    $shippingCharges = session('shipping_charges');
+                    if (is_array($shippingCharges)) {
+                        $shippingCharges = array_map(function($charge) use ($oldNetworkName, $newNetworkName) {
+                            if (isset($charge['network']) && $charge['network'] === $oldNetworkName) {
+                                $charge['network'] = $newNetworkName;
+                            }
+                            return $charge;
+                        }, $shippingCharges);
+                        session(['shipping_charges' => array_values($shippingCharges)]);
+                    }
+                }
+                
+                // Update Formulas in session
+                if (session()->has('formulas')) {
+                    $formulas = session('formulas');
+                    if (is_array($formulas)) {
+                        $formulas = array_map(function($formula) use ($oldNetworkName, $newNetworkName) {
+                            if (isset($formula['network']) && $formula['network'] === $oldNetworkName) {
+                                $formula['network'] = $newNetworkName;
+                            }
+                            return $formula;
+                        }, $formulas);
+                        session(['formulas' => array_values($formulas)]);
+                    }
+                }
+            }
+            
             // Also update session for backward compatibility
             $networks = $this->getNetworks();
             if (!is_array($networks)) {
                 $networks = [];
             }
             
-            $networks = array_map(function($n) use ($id, $request, $status, $openingBalance, $upiScanner) {
+            $networks = array_map(function($n) use ($id, $request, $status, $openingBalance, $upiScanner, $newNetworkName) {
                 if ($n['id'] == $id) {
                     return [
                         'id' => $id,
-                        'name' => $request->network_name,
+                        'name' => $newNetworkName,
                         'type' => $request->network_type,
                         'opening_balance' => $openingBalance, // Keep original opening balance
                         'status' => $status,
@@ -1482,6 +1576,7 @@ class AdminController extends Controller
             'description' => $request->description ?? '',
             'icon_type' => $request->icon_type ?? 'truck',
             'is_highlighted' => $isHighlighted,
+            'created_at' => now()->toDateTimeString(),
         ];
         
         $services[] = $newService;
@@ -1528,17 +1623,22 @@ class AdminController extends Controller
             $services = [];
         }
         
-        $services = array_map(function($service) use ($id, $request, $status, $isHighlighted) {
+        // Store old service name for cascading updates
+        $oldService = collect($services)->firstWhere('id', $id);
+        $oldServiceName = $oldService['name'] ?? null;
+        $newServiceName = $request->service_name;
+        
+        $services = array_map(function($service) use ($id, $request, $status, $isHighlighted, $newServiceName) {
             if ($service['id'] == $id) {
                 return [
                     'id' => $id,
-                    'name' => $request->service_name,
+                    'name' => $newServiceName,
                     'network' => $request->network,
                     'transit_time' => $request->transit_time,
                     'items_allowed' => $request->items_allowed,
                     'status' => $status,
                     'remark' => $request->remark ?? '',
-                    'display_title' => $request->display_title ?? $request->service_name,
+                    'display_title' => $request->display_title ?? $newServiceName,
                     'description' => $request->description ?? ($service['description'] ?? ''),
                     'icon_type' => $request->icon_type ?? ($service['icon_type'] ?? 'truck'),
                     'is_highlighted' => $isHighlighted,
@@ -1546,6 +1646,68 @@ class AdminController extends Controller
             }
             return $service;
         }, $services);
+        
+        // Cascade update: Update all related records if service name changed
+        if ($oldServiceName && $oldServiceName !== $newServiceName) {
+            // Update AwbUploads in database
+            \DB::table('awb_uploads')
+                ->where('service_name', $oldServiceName)
+                ->update(['service_name' => $newServiceName]);
+            
+            // Update Bookings in session
+            $bookings = $this->getBookings();
+            if (is_array($bookings)) {
+                $bookings = array_map(function($booking) use ($oldServiceName, $newServiceName) {
+                    if (isset($booking['service']) && $booking['service'] === $oldServiceName) {
+                        $booking['service'] = $newServiceName;
+                    }
+                    return $booking;
+                }, $bookings);
+                session(['bookings' => array_values($bookings)]);
+            }
+            
+            // Update Direct Entry Bookings in session
+            if (session()->has('direct_entry_bookings')) {
+                $directEntryBookings = session('direct_entry_bookings');
+                if (is_array($directEntryBookings)) {
+                    $directEntryBookings = array_map(function($booking) use ($oldServiceName, $newServiceName) {
+                        if (isset($booking['service']) && $booking['service'] === $oldServiceName) {
+                            $booking['service'] = $newServiceName;
+                        }
+                        return $booking;
+                    }, $directEntryBookings);
+                    session(['direct_entry_bookings' => array_values($directEntryBookings)]);
+                }
+            }
+            
+            // Update Shipping Charges in session
+            if (session()->has('shipping_charges')) {
+                $shippingCharges = session('shipping_charges');
+                if (is_array($shippingCharges)) {
+                    $shippingCharges = array_map(function($charge) use ($oldServiceName, $newServiceName) {
+                        if (isset($charge['service']) && $charge['service'] === $oldServiceName) {
+                            $charge['service'] = $newServiceName;
+                        }
+                        return $charge;
+                    }, $shippingCharges);
+                    session(['shipping_charges' => array_values($shippingCharges)]);
+                }
+            }
+            
+            // Update Formulas in session
+            if (session()->has('formulas')) {
+                $formulas = session('formulas');
+                if (is_array($formulas)) {
+                    $formulas = array_map(function($formula) use ($oldServiceName, $newServiceName) {
+                        if (isset($formula['service']) && $formula['service'] === $oldServiceName) {
+                            $formula['service'] = $newServiceName;
+                        }
+                        return $formula;
+                    }, $formulas);
+                    session(['formulas' => array_values($formulas)]);
+                }
+            }
+        }
         
         session(['services' => array_values($services)]);
         session()->save();
@@ -1793,6 +1955,7 @@ class AdminController extends Controller
             'dialing_code' => $request->country_dialing_code ?? '',
             'status' => $status,
             'remark' => $request->remark ?? '',
+            'created_at' => now()->toDateTimeString(),
         ];
         
         $countries[] = $newCountry;
@@ -1841,6 +2004,7 @@ class AdminController extends Controller
                     'dialing_code' => $request->country_dialing_code ?? '',
                     'status' => $status,
                     'remark' => $request->remark ?? '',
+                    'created_at' => $country['created_at'] ?? now()->toDateTimeString(),
                 ];
             }
             return $country;
@@ -1999,12 +2163,15 @@ class AdminController extends Controller
 
     private function getZoneOptions()
     {
-        return [
-            'No Zone',
-            'Remote',
-        ] + array_map(function($i) {
-            return "Zone {$i}";
-        }, range(1, 60));
+        return array_merge(
+            [
+                'No Zone',
+                'Remote',
+            ],
+            array_map(function ($i) {
+                return "Zone {$i}";
+            }, range(1, 60))
+        );
     }
 
     public function zones()
@@ -2126,6 +2293,7 @@ class AdminController extends Controller
             'service' => $request->service,
             'status' => $status,
             'remark' => $request->remark ?? '',
+            'created_at' => now()->toDateTimeString(),
         ];
         
         $zones[] = $newZone;
@@ -2176,6 +2344,7 @@ class AdminController extends Controller
                     'service' => $request->service,
                     'status' => $status,
                     'remark' => $request->remark ?? '',
+                    'created_at' => $zone['created_at'] ?? now()->toDateTimeString(),
                 ];
             }
             return $zone;
@@ -2430,6 +2599,7 @@ class AdminController extends Controller
             'service' => $request->service,
             'rate' => $request->rate,
             'remark' => $request->remark ?? '',
+            'created_at' => now()->toDateTimeString(),
         ];
         
         $shippingCharges[] = $newCharge;
@@ -2484,6 +2654,7 @@ class AdminController extends Controller
                     'service' => $request->service,
                     'rate' => $request->rate,
                     'remark' => $request->remark ?? '',
+                    'created_at' => $charge['created_at'] ?? now()->toDateTimeString(),
                 ];
             }
             return $charge;
@@ -2604,9 +2775,30 @@ class AdminController extends Controller
         return ['per kg', 'Flat'];
     }
 
-    private function getFormulaPriorities()
+    private function normalizePriority(?string $priority): string
     {
-        return ['1st', '2nd', '3rd', '4th'];
+        return strtolower(trim($priority ?? ''));
+    }
+
+    private function priorityExists(string $priority, ?int $ignoreId = null): bool
+    {
+        $normalized = $this->normalizePriority($priority);
+        if ($normalized === '') {
+            return false;
+        }
+
+        $formulas = $this->getFormulas();
+        foreach ($formulas as $formula) {
+            if ($ignoreId !== null && isset($formula['id']) && (int)$formula['id'] === (int)$ignoreId) {
+                continue;
+            }
+
+            if ($this->normalizePriority($formula['priority'] ?? '') === $normalized) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function formulas()
@@ -2621,14 +2813,12 @@ class AdminController extends Controller
         $services = $this->getServices();
         $types = $this->getFormulaTypes();
         $scopes = $this->getFormulaScopes();
-        $priorities = $this->getFormulaPriorities();
         return view('admin.formulas.create', [
             'formulas' => $formulas,
             'networks' => $networks,
             'services' => $services,
             'types' => $types,
             'scopes' => $scopes,
-            'priorities' => $priorities,
         ]);
     }
 
@@ -2710,7 +2900,6 @@ class AdminController extends Controller
         $services = $this->getServices();
         $types = $this->getFormulaTypes();
         $scopes = $this->getFormulaScopes();
-        $priorities = $this->getFormulaPriorities();
         
         if (!$formula) {
             return redirect()->route('admin.formulas.all')->with('error', 'Formula not found');
@@ -2723,7 +2912,6 @@ class AdminController extends Controller
             'services' => $services,
             'types' => $types,
             'scopes' => $scopes,
-            'priorities' => $priorities,
         ]);
     }
 
@@ -2735,11 +2923,26 @@ class AdminController extends Controller
             'service' => 'required|string|max:255',
             'type' => 'required|string|in:Fixed,Percentage',
             'scope' => 'required|string|in:per kg,Flat',
-            'priority' => 'required|string|in:1st,2nd,3rd,4th',
+            'priority' => 'required|string|max:255',
             'value' => 'required|numeric|min:0',
             'remark' => 'nullable|string',
             'status' => 'nullable',
         ]);
+
+        $priorityValue = trim($request->priority);
+        if ($this->priorityExists($priorityValue)) {
+            $message = 'Priority already exists. Please choose another value.';
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                ], 422);
+            }
+
+            return redirect()->back()
+                ->withErrors(['priority' => $message])
+                ->withInput();
+        }
 
         // Convert checkbox value to status string
         $statusValue = $request->input('status');
@@ -2759,10 +2962,11 @@ class AdminController extends Controller
             'service' => $request->service,
             'type' => $request->type,
             'scope' => $request->scope,
-            'priority' => $request->priority,
+            'priority' => $priorityValue,
             'value' => $request->value,
             'status' => $status,
             'remark' => $request->remark ?? '',
+            'created_at' => now()->toDateTimeString(),
         ];
         
         $formulas[] = $newFormula;
@@ -2789,11 +2993,26 @@ class AdminController extends Controller
             'service' => 'required|string|max:255',
             'type' => 'required|string|in:Fixed,Percentage',
             'scope' => 'required|string|in:per kg,Flat',
-            'priority' => 'required|string|in:1st,2nd,3rd,4th',
+            'priority' => 'required|string|max:255',
             'value' => 'required|numeric|min:0',
             'remark' => 'nullable|string',
             'status' => 'nullable',
         ]);
+
+        $priorityValue = trim($request->priority);
+        if ($this->priorityExists($priorityValue, (int)$id)) {
+            $message = 'Priority already exists. Please choose another value.';
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                ], 422);
+            }
+
+            return redirect()->back()
+                ->withErrors(['priority' => $message])
+                ->withInput();
+        }
 
         // Convert checkbox value to status string
         $statusValue = $request->input('status');
@@ -2804,7 +3023,7 @@ class AdminController extends Controller
             $formulas = [];
         }
         
-        $formulas = array_map(function($formula) use ($id, $request, $status) {
+        $formulas = array_map(function($formula) use ($id, $request, $status, $priorityValue) {
             if ($formula['id'] == $id) {
                 return [
                     'id' => $id,
@@ -2813,10 +3032,11 @@ class AdminController extends Controller
                     'service' => $request->service,
                     'type' => $request->type,
                     'scope' => $request->scope,
-                    'priority' => $request->priority,
+                    'priority' => $priorityValue,
                     'value' => $request->value,
                     'status' => $status,
                     'remark' => $request->remark ?? '',
+                    'created_at' => $formula['created_at'] ?? now()->toDateTimeString(),
                 ];
             }
             return $formula;
@@ -3295,10 +3515,6 @@ class AdminController extends Controller
         $services = $this->getServices();
         $bookingTypes = $this->getBookingTypes();
         $shipmentTypes = $this->getShipmentTypesForUpload();
-        
-        // Get branches from networks (or use a separate list)
-        $branches = ['Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata'];
-        
         return view('admin.awb-upload.create', [
             'awbUploads' => $awbUploads,
             'countries' => $countries,
@@ -3306,7 +3522,6 @@ class AdminController extends Controller
             'services' => $services,
             'bookingTypes' => $bookingTypes,
             'shipmentTypes' => $shipmentTypes,
-            'branches' => $branches,
         ]);
     }
 
@@ -3386,9 +3601,6 @@ class AdminController extends Controller
         $services = $this->getServices();
         $bookingTypes = $this->getBookingTypes();
         $shipmentTypes = $this->getShipmentTypesForUpload();
-        
-        $branches = ['Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata'];
-        
         if (!$upload) {
             return redirect()->route('admin.awb-upload.all')->with('error', 'AWB Upload not found');
         }
@@ -3401,7 +3613,6 @@ class AdminController extends Controller
             'services' => $services,
             'bookingTypes' => $bookingTypes,
             'shipmentTypes' => $shipmentTypes,
-            'branches' => $branches,
         ]);
     }
 
@@ -3440,6 +3651,8 @@ class AdminController extends Controller
             'location' => 'nullable|string|max:255',
             'forwarding_service' => 'nullable|string|max:255',
             'remark_3' => 'nullable|string',
+            'branch' => 'required|string|max:255',
+            'hub' => 'required|string|max:255',
         ]);
 
         // Check for duplicate AWB No in database
@@ -3458,6 +3671,8 @@ class AdminController extends Controller
             'destination_zone' => $request->destination_zone,
             'destination_zone_pincode' => $request->destination_zone_pincode,
             'reference_no' => $request->reference_no ?? null,
+            'branch' => $request->branch,
+            'hub' => $request->hub,
             'date_of_sale' => $request->date_of_sale ?? null,
             'invoice_date' => $request->invoice_date ?? null,
             'non_commercial' => $request->non_commercial ?? null,
@@ -3506,6 +3721,7 @@ class AdminController extends Controller
             'awb_no' => 'required|string|max:255|regex:/^[a-zA-Z0-9]+$/',
             'date_of_sale' => 'nullable|date',
             'branch' => 'nullable|string|max:255',
+            'hub' => 'nullable|string|max:255',
             'status' => 'required|string|max:255',
             'booking_type' => 'nullable|string|in:International,Domestic',
             'shipment_type' => 'required|string|in:Dox,Non-Dox,Other',
@@ -3550,6 +3766,7 @@ class AdminController extends Controller
                     'id' => $id,
                     'awb_no' => $request->awb_no,
                     'date_of_sale' => $request->date_of_sale ?? '',
+                    'hub' => $request->hub ?? '',
                     'branch' => $request->branch ?? '',
                     'status' => $request->status,
                     'booking_type' => $request->booking_type ?? '',
@@ -4984,10 +5201,19 @@ class AdminController extends Controller
     }
 
     // Reports Management
-    public function zoneReport()
+    public function zoneReport(Request $request)
     {
-        $zones = $this->getZones();
-        return view('admin.reports.zone', compact('zones'));
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $zones = $this->normalizeReportTimestamps($this->getZones(), 'zones');
+        $zones = $this->filterCollectionByDate($zones, $dateFrom, $dateTo);
+
+        return view('admin.reports.zone', [
+            'zones' => $zones,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
     }
     
     /**
@@ -5069,16 +5295,34 @@ class AdminController extends Controller
         return $financials;
     }
 
-    public function formulaReport()
+    public function formulaReport(Request $request)
     {
-        $formulas = $this->getFormulas();
-        return view('admin.reports.formula', compact('formulas'));
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $formulas = $this->normalizeReportTimestamps($this->getFormulas(), 'formulas');
+        $formulas = $this->filterCollectionByDate($formulas, $dateFrom, $dateTo);
+
+        return view('admin.reports.formula', [
+            'formulas' => $formulas,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
     }
 
-    public function shippingChargesReport()
+    public function shippingChargesReport(Request $request)
     {
-        $shippingCharges = $this->getShippingCharges();
-        return view('admin.reports.shipping-charges', compact('shippingCharges'));
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $shippingCharges = $this->normalizeReportTimestamps($this->getShippingCharges(), 'shipping_charges');
+        $shippingCharges = $this->filterCollectionByDate($shippingCharges, $dateFrom, $dateTo);
+
+        return view('admin.reports.shipping-charges', [
+            'shippingCharges' => $shippingCharges,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
     }
 
     public function bookingReport(Request $request)
@@ -5178,11 +5422,19 @@ class AdminController extends Controller
         ]);
     }
 
-    public function paymentReport()
+    public function paymentReport(Request $request)
     {
-        // Payment data would come from a payment system
-        $payments = session('payments', []);
-        return view('admin.reports.payment', compact('payments'));
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $payments = $this->normalizeReportTimestamps(session('payments', []), null, 'payment_date');
+        $payments = $this->filterCollectionByDate($payments, $dateFrom, $dateTo, 'payment_date');
+
+        return view('admin.reports.payment', [
+            'payments' => $payments,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
     }
 
     public function transactionReport(Request $request)
@@ -5527,22 +5779,44 @@ class AdminController extends Controller
         ]);
     }
 
-    public function serviceReport()
+    public function serviceReport(Request $request)
     {
-        $services = $this->getServices();
-        return view('admin.reports.service', compact('services'));
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $services = $this->normalizeReportTimestamps($this->getServices(), 'services');
+        $services = $this->filterCollectionByDate($services, $dateFrom, $dateTo);
+
+        return view('admin.reports.service', [
+            'services' => $services,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
     }
 
-    public function countryReport()
+    public function countryReport(Request $request)
     {
-        $countries = $this->getCountries();
-        return view('admin.reports.country', compact('countries'));
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $countries = $this->normalizeReportTimestamps($this->getCountries(), 'countries');
+        $countries = $this->filterCollectionByDate($countries, $dateFrom, $dateTo);
+
+        return view('admin.reports.country', [
+            'countries' => $countries,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
     }
 
     // Excel Export Methods
-    public function exportZoneReport()
+    public function exportZoneReport(Request $request)
     {
-        $zones = $this->getZones();
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $zones = $this->normalizeReportTimestamps($this->getZones(), 'zones');
+        $zones = $this->filterCollectionByDate($zones, $dateFrom, $dateTo);
         
         $export = new class($zones) implements FromArray, WithHeadings {
             protected $zones;
@@ -5576,12 +5850,20 @@ class AdminController extends Controller
             }
         };
         
-        return Excel::download($export, 'zone_report_' . date('Y-m-d') . '.xlsx');
+        $filename = 'zone_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        return Excel::download($export, $filename . '.xlsx');
     }
 
-    public function exportFormulaReport()
+    public function exportFormulaReport(Request $request)
     {
-        $formulas = $this->getFormulas();
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $formulas = $this->normalizeReportTimestamps($this->getFormulas(), 'formulas');
+        $formulas = $this->filterCollectionByDate($formulas, $dateFrom, $dateTo);
         
         $export = new class($formulas) implements FromArray, WithHeadings {
             protected $formulas;
@@ -5617,12 +5899,20 @@ class AdminController extends Controller
             }
         };
         
-        return Excel::download($export, 'formula_report_' . date('Y-m-d') . '.xlsx');
+        $filename = 'formula_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        return Excel::download($export, $filename . '.xlsx');
     }
 
-    public function exportShippingChargesReport()
+    public function exportShippingChargesReport(Request $request)
     {
-        $shippingCharges = $this->getShippingCharges();
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $shippingCharges = $this->normalizeReportTimestamps($this->getShippingCharges(), 'shipping_charges');
+        $shippingCharges = $this->filterCollectionByDate($shippingCharges, $dateFrom, $dateTo);
         
         $export = new class($shippingCharges) implements FromArray, WithHeadings {
             protected $shippingCharges;
@@ -5660,15 +5950,79 @@ class AdminController extends Controller
             }
         };
         
-        return Excel::download($export, 'shipping_charges_report_' . date('Y-m-d') . '.xlsx');
+        $filename = 'shipping_charges_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        return Excel::download($export, $filename . '.xlsx');
     }
 
-    public function exportBookingReport()
+    public function exportBookingReport(Request $request)
     {
+        // Get filter parameters (same as bookingReport method)
+        $category = $request->get('category', '');
+        $hub = $request->get('hub', '');
+        $branch = $request->get('branch', '');
+        $dateFrom = $request->get('date_from', '');
+        $dateTo = $request->get('date_to', '');
+        $search = $request->get('search', '');
+        
+        // Get all bookings
         $bookings = $this->getBookings();
         $directEntryBookings = $this->getDirectEntryBookings();
         
-        $export = new class($bookings, $directEntryBookings) implements FromArray, WithHeadings {
+        // Combine bookings
+        $allBookings = array_merge($bookings, $directEntryBookings);
+        
+        // Apply filters (same logic as bookingReport method)
+        if ($hub) {
+            $allBookings = array_filter($allBookings, function($booking) use ($hub) {
+                return isset($booking['hub']) && $booking['hub'] === $hub;
+            });
+        }
+        
+        if ($branch) {
+            $allBookings = array_filter($allBookings, function($booking) use ($branch) {
+                return isset($booking['branch']) && $booking['branch'] === $branch;
+            });
+        }
+        
+        if ($dateFrom) {
+            $allBookings = array_filter($allBookings, function($booking) use ($dateFrom) {
+                $bookingDate = $booking['current_booking_date'] ?? $booking['date_of_sale'] ?? '';
+                return $bookingDate >= $dateFrom;
+            });
+        }
+        
+        if ($dateTo) {
+            $allBookings = array_filter($allBookings, function($booking) use ($dateTo) {
+                $bookingDate = $booking['current_booking_date'] ?? $booking['date_of_sale'] ?? '';
+                return $bookingDate <= $dateTo;
+            });
+        }
+        
+        if ($search) {
+            $allBookings = array_filter($allBookings, function($booking) use ($search) {
+                return stripos($booking['awb_no'] ?? '', $search) !== false 
+                    || stripos($booking['origin'] ?? '', $search) !== false
+                    || stripos($booking['destination'] ?? '', $search) !== false
+                    || stripos($booking['admin_name'] ?? 'System', $search) !== false;
+            });
+        }
+        
+        // Separate bookings back
+        $filteredBookings = [];
+        $filteredDirectEntry = [];
+        
+        foreach ($allBookings as $booking) {
+            if (isset($booking['is_direct_entry']) && $booking['is_direct_entry']) {
+                $filteredDirectEntry[] = $booking;
+            } else {
+                $filteredBookings[] = $booking;
+            }
+        }
+        
+        $export = new class($filteredBookings, $filteredDirectEntry) implements FromArray, WithHeadings {
             protected $bookings;
             protected $directEntryBookings;
             
@@ -5727,13 +6081,28 @@ class AdminController extends Controller
             }
         };
         
-        return Excel::download($export, 'booking_report_' . date('Y-m-d') . '.xlsx');
+        $filename = 'booking_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        if ($hub) {
+            $filename .= '_hub_' . str_replace(' ', '_', $hub);
+        }
+        if ($branch) {
+            $filename .= '_branch_' . str_replace(' ', '_', $branch);
+        }
+        
+        return Excel::download($export, $filename . '.xlsx');
     }
 
-    public function exportPaymentReport()
+    public function exportPaymentReport(Request $request)
     {
-        $payments = session('payments', []);
-        
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $payments = $this->normalizeReportTimestamps(session('payments', []), null, 'payment_date');
+        $payments = $this->filterCollectionByDate($payments, $dateFrom, $dateTo, 'payment_date');
+
         $export = new class($payments) implements FromArray, WithHeadings {
             protected $payments;
             
@@ -5748,7 +6117,7 @@ class AdminController extends Controller
                 foreach ($this->payments as $payment) {
                     $data[] = [
                         $payment['id'] ?? '-',
-                        $payment['payment_date'] ?? '-',
+                        $payment['payment_date'] ?? ($payment['created_at'] ?? '-'),
                         $payment['payment_method'] ?? '-',
                         $payment['amount'] ?? '0',
                         $payment['status'] ?? '-',
@@ -5764,7 +6133,11 @@ class AdminController extends Controller
             }
         };
         
-        return Excel::download($export, 'payment_report_' . date('Y-m-d') . '.xlsx');
+        $filename = 'payment_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function exportNetworkReport(Request $request)
@@ -5862,9 +6235,13 @@ class AdminController extends Controller
         return Excel::download($export, $filename . '.xlsx');
     }
 
-    public function exportServiceReport()
+    public function exportServiceReport(Request $request)
     {
-        $services = $this->getServices();
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $services = $this->normalizeReportTimestamps($this->getServices(), 'services');
+        $services = $this->filterCollectionByDate($services, $dateFrom, $dateTo);
         
         $export = new class($services) implements FromArray, WithHeadings {
             protected $services;
@@ -5897,12 +6274,20 @@ class AdminController extends Controller
             }
         };
         
-        return Excel::download($export, 'service_report_' . date('Y-m-d') . '.xlsx');
+        $filename = 'service_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        return Excel::download($export, $filename . '.xlsx');
     }
 
-    public function exportCountryReport()
+    public function exportCountryReport(Request $request)
     {
-        $countries = $this->getCountries();
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $countries = $this->normalizeReportTimestamps($this->getCountries(), 'countries');
+        $countries = $this->filterCollectionByDate($countries, $dateFrom, $dateTo);
         
         $export = new class($countries) implements FromArray, WithHeadings {
             protected $countries;
@@ -5935,20 +6320,187 @@ class AdminController extends Controller
             }
         };
         
-        return Excel::download($export, 'country_report_' . date('Y-m-d') . '.xlsx');
+        $filename = 'country_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        return Excel::download($export, $filename . '.xlsx');
     }
 
-    public function bankReport()
+    public function exportBankReport(Request $request)
     {
-        $banks = $this->getBanks();
-        return view('admin.reports.bank', compact('banks'));
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $banks = $this->normalizeReportTimestamps($this->getBanks(), 'banks');
+        $banks = $this->filterCollectionByDate($banks, $dateFrom, $dateTo);
+
+        $export = new class($banks) implements FromArray, WithHeadings {
+            protected $banks;
+
+            public function __construct($banks)
+            {
+                $this->banks = $banks;
+            }
+
+            public function array(): array
+            {
+                $data = [];
+                foreach ($this->banks as $bank) {
+                    $data[] = [
+                        $bank['id'] ?? '',
+                        $bank['bank_name'] ?? '',
+                        $bank['account_holder_name'] ?? '',
+                        $bank['account_number'] ?? '',
+                        $bank['ifsc_code'] ?? '',
+                        $bank['opening_balance'] ?? 0,
+                        $bank['created_at'] ?? '',
+                    ];
+                }
+                return $data;
+            }
+
+            public function headings(): array
+            {
+                return ['ID', 'Bank Name', 'Account Holder', 'Account Number', 'IFSC Code', 'Opening Balance', 'Created At'];
+            }
+        };
+
+        $filename = 'bank_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        return Excel::download($export, $filename . '.xlsx');
     }
 
-    public function walletReport()
+    public function exportWalletReport(Request $request)
     {
-        // Wallet data would come from a wallet system
-        $wallets = session('wallets', []);
-        return view('admin.reports.wallet', compact('wallets'));
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $wallets = $this->normalizeReportTimestamps(session('wallets', []), 'wallets');
+        $wallets = $this->filterCollectionByDate($wallets, $dateFrom, $dateTo);
+
+        $export = new class($wallets) implements FromArray, WithHeadings {
+            protected $wallets;
+
+            public function __construct($wallets)
+            {
+                $this->wallets = $wallets;
+            }
+
+            public function array(): array
+            {
+                $data = [];
+                foreach ($this->wallets as $wallet) {
+                    $data[] = [
+                        $wallet['id'] ?? '',
+                        $wallet['wallet_name'] ?? '',
+                        $wallet['balance'] ?? 0,
+                        $wallet['status'] ?? '',
+                        $wallet['last_transaction'] ?? '',
+                        $wallet['created_at'] ?? '',
+                    ];
+                }
+                return $data;
+            }
+
+            public function headings(): array
+            {
+                return ['ID', 'Wallet Name', 'Balance', 'Status', 'Last Transaction', 'Created At'];
+            }
+        };
+
+        $filename = 'wallet_report_' . date('Y-m-d');
+        if ($dateFrom || $dateTo) {
+            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        }
+        return Excel::download($export, $filename . '.xlsx');
+    }
+
+    public function bankReport(Request $request)
+    {
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $banks = $this->normalizeReportTimestamps($this->getBanks(), 'banks');
+        $banks = $this->filterCollectionByDate($banks, $dateFrom, $dateTo);
+
+        return view('admin.reports.bank', [
+            'banks' => $banks,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
+    }
+
+    public function walletReport(Request $request)
+    {
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        $wallets = $this->normalizeReportTimestamps(session('wallets', []), 'wallets');
+        $wallets = $this->filterCollectionByDate($wallets, $dateFrom, $dateTo);
+
+        return view('admin.reports.wallet', [
+            'wallets' => $wallets,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
+    }
+
+    /**
+     * Ensure each report item has a timestamp for filtering.
+     */
+    private function normalizeReportTimestamps(array $items, ?string $sessionKey = null, string $dateKey = 'created_at'): array
+    {
+        $normalized = array_map(function ($item) use ($dateKey) {
+            if (empty($item[$dateKey])) {
+                $item[$dateKey] = now()->toDateTimeString();
+            }
+            return $item;
+        }, $items);
+
+        if ($sessionKey) {
+            session([$sessionKey => $normalized]);
+            session()->save();
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Filter report items by the provided date range.
+     */
+    private function filterCollectionByDate(array $items, ?string $dateFrom, ?string $dateTo, string $dateKey = 'created_at'): array
+    {
+        if (empty($dateFrom) && empty($dateTo)) {
+            return $items;
+        }
+
+        $from = $dateFrom ? Carbon::parse($dateFrom)->startOfDay() : null;
+        $to = $dateTo ? Carbon::parse($dateTo)->endOfDay() : null;
+
+        return array_values(array_filter($items, function ($item) use ($from, $to, $dateKey) {
+            if (empty($item[$dateKey])) {
+                return true;
+            }
+
+            try {
+                $itemDate = Carbon::parse($item[$dateKey]);
+            } catch (\Exception $exception) {
+                return true;
+            }
+
+            if ($from && $itemDate->lt($from)) {
+                return false;
+            }
+
+            if ($to && $itemDate->gt($to)) {
+                return false;
+            }
+
+            return true;
+        }));
     }
 
     // Banks Management
@@ -6041,6 +6593,7 @@ class AdminController extends Controller
             'account_number' => $request->account_number,
             'ifsc_code' => $request->ifsc_code,
             'opening_balance' => (float) $request->opening_balance,
+            'created_at' => now()->toDateTimeString(),
         ];
         
         $banks[] = $newBank;
@@ -6074,6 +6627,7 @@ class AdminController extends Controller
                     'account_number' => $request->account_number,
                     'ifsc_code' => $request->ifsc_code,
                     'opening_balance' => (float) $request->opening_balance,
+                    'created_at' => $bank['created_at'] ?? now()->toDateTimeString(),
                 ];
             }
             return $bank;
@@ -6100,6 +6654,47 @@ class AdminController extends Controller
         session()->save();
 
         return redirect()->route('admin.banks.all')->with('success', 'Bank deleted successfully!');
+    }
+
+    public function bulkDeleteBanks(Request $request)
+    {
+        $validated = $request->validate([
+            'selected_ids' => 'required|array',
+            'selected_ids.*' => 'integer',
+        ]);
+
+        $ids = array_map('intval', $validated['selected_ids']);
+
+        try {
+            Bank::whereIn('id', $ids)->delete();
+        } catch (\Throwable $exception) {
+            Log::warning('Failed to delete banks from database', [
+                'ids' => $ids,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        $banks = $this->getBanks();
+        if (!is_array($banks)) {
+            $banks = [];
+        }
+
+        $beforeCount = count($banks);
+        $banks = array_filter($banks, function ($bank) use ($ids) {
+            return !in_array($bank['id'], $ids);
+        });
+        $deletedCount = $beforeCount - count($banks);
+
+        session(['banks' => array_values($banks)]);
+        session()->save();
+
+        if ($deletedCount === 0) {
+            return redirect()->route('admin.banks.all')
+                ->with('info', 'No banks were removed.');
+        }
+
+        return redirect()->route('admin.banks.all')
+            ->with('success', "Successfully deleted {$deletedCount} bank(s).");
     }
 
     // Payments Into Bank Management
@@ -7441,7 +8036,7 @@ class AdminController extends Controller
     {
         $request->validate([
             'user_id' => 'required|exists:users,id',
-            'user_type' => 'required|in:merchant,deliveryman,user',
+            'user_type' => 'required|string|max:255',
             'salary_amount' => 'required|numeric|min:0',
             'period_start' => 'required|date',
             'period_end' => 'required|date|after_or_equal:period_start',
@@ -7475,7 +8070,7 @@ class AdminController extends Controller
     public function salaryGenerateAuto(Request $request)
     {
         $request->validate([
-            'user_type' => 'required|in:merchant,deliveryman,user',
+            'user_type' => 'required|string|max:255',
             'salary_amount' => 'required|numeric|min:0',
             'period_start' => 'required|date',
             'period_end' => 'required|date|after_or_equal:period_start',
@@ -7526,9 +8121,13 @@ class AdminController extends Controller
         $payrolls = session('payrolls', []);
         
         // Get user details for each payroll
-        foreach ($payrolls as &$payroll) {
-            $user = User::find($payroll['user_id']);
-            $payroll['user'] = $user;
+        if (!empty($payrolls)) {
+            foreach ($payrolls as &$payroll) {
+                if (isset($payroll['user_id'])) {
+                    $user = User::find($payroll['user_id']);
+                    $payroll['user'] = $user;
+                }
+            }
         }
 
         return view('admin.payroll.list.index', compact('payrolls'));
@@ -7540,6 +8139,62 @@ class AdminController extends Controller
     public function sandBullaryGenerateIndex()
     {
         return view('admin.payroll.sand-bullary-generate.index');
+    }
+
+    /**
+     * Mirror a stored file into the publicly accessible storage directory.
+     *
+     * This provides compatibility for hosting environments where symbolic links
+     * (used by the default Laravel storage:link approach) are not available.
+     */
+    private function mirrorFileToPublicStorage(?string $relativePath): void
+    {
+        if (empty($relativePath)) {
+            return;
+        }
+
+        try {
+            $sourcePath = storage_path('app/public/' . $relativePath);
+            if (!File::exists($sourcePath)) {
+                return;
+            }
+
+            $targetPath = public_path('storage/' . $relativePath);
+
+            $targetDirectory = dirname($targetPath);
+            if (!File::exists($targetDirectory)) {
+                File::makeDirectory($targetDirectory, 0755, true);
+            }
+
+            File::copy($sourcePath, $targetPath);
+        } catch (\Throwable $exception) {
+            Log::warning('Failed to mirror file to public storage', [
+                'path' => $relativePath,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Remove the mirrored file from the publicly accessible storage directory.
+     */
+    private function deleteMirroredPublicFile(?string $relativePath): void
+    {
+        if (empty($relativePath)) {
+            return;
+        }
+
+        $targetPath = public_path('storage/' . $relativePath);
+        if (File::exists($targetPath)) {
+            try {
+                File::delete($targetPath);
+            } catch (\Throwable $exception) {
+                Log::warning('Failed to delete mirrored public file', [
+                    'path' => $relativePath,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
     }
 }
 

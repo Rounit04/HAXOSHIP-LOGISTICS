@@ -3,7 +3,7 @@
 @section('title', 'Create AWB Upload')
 
 @section('content')
-    <style>
+<style>
         .page-header {
             background: linear-gradient(135deg, #ffffff 0%, #f8f9ff 100%);
             border-radius: 12px;
@@ -105,7 +105,7 @@
                 </div>
             @endif
             
-            <div class="flex items-center gap-4">
+            <div class="flex flex-col lg:flex-row lg:items-end gap-4">
                 <div class="flex-1">
                     <label class="form-label">
                         <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -116,16 +116,14 @@
                     <input type="file" name="excel_file" id="excel_file" accept=".xlsx,.xls,.csv" class="form-input" required>
                     <p class="text-xs text-gray-500 mt-1">Upload Excel file with AWB data. Service Name and Network Name will be automatically matched.</p>
                 </div>
-                <div>
-                    <button type="submit" class="admin-btn-primary px-6 py-3 text-sm font-semibold mt-6">
-                        <div class="flex items-center gap-2">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
-                            </svg>
-                            <span>Upload Excel</span>
-                        </div>
-                    </button>
-                </div>
+                <button type="submit" class="admin-btn-primary px-6 py-3 text-sm font-semibold mt-6">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        <span>Upload Excel</span>
+                    </div>
+                </button>
             </div>
         </form>
         
@@ -167,6 +165,28 @@
                             <p class="text-red-700 font-bold text-sm">{{ session('error') }}</p>
                         </div>
                     @endif
+
+                    <!-- Branch & Hub -->
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label class="form-label">
+                                <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                                </svg>
+                                Branch <span class="required">*</span>
+                            </label>
+                            <input type="text" name="branch" id="branch" class="form-input" placeholder="Enter Branch" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253V4m0 0a8 8 0 018 8v5a3 3 0 01-3 3H7a3 3 0 01-3-3v-5a8 8 0 018-8z"/>
+                                </svg>
+                                Hub <span class="required">*</span>
+                            </label>
+                            <input type="text" name="hub" id="hub" class="form-input" placeholder="Enter Hub" required>
+                        </div>
+                    </div>
 
                     <!-- AWB No. (Required but not in Excel - system field) -->
                     <div class="form-group">
@@ -655,7 +675,74 @@
             </div>
         </div>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const networkSelect = document.getElementById('network_name');
+            const serviceSelect = document.getElementById('service_name');
+            const services = @json($services);
+
+            function buildOption(value, label, extraClasses = '', disabled = false) {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = label;
+                if (extraClasses) {
+                    option.className = extraClasses;
+                }
+                if (disabled) {
+                    option.disabled = true;
+                }
+                return option;
+            }
+
+            function populateServices() {
+                if (!serviceSelect) {
+                    return;
+                }
+
+                const selectedNetwork = (networkSelect?.value || '').trim();
+                serviceSelect.innerHTML = '';
+                serviceSelect.appendChild(buildOption('', 'Select Service'));
+
+                const filteredServices = (services || []).filter(service => {
+                    const serviceNetwork = (service.network || '').trim();
+                    const isActive = (service.status || '').toLowerCase() === 'active';
+
+                    if (!isActive) {
+                        return false;
+                    }
+
+                    if (!selectedNetwork) {
+                        return true;
+                    }
+
+                    return serviceNetwork === selectedNetwork;
+                });
+
+                if (filteredServices.length === 0) {
+                    if (selectedNetwork) {
+                        serviceSelect.appendChild(
+                            buildOption('', 'No services available for this network', 'text-gray-400', true)
+                        );
+                    }
+                    serviceSelect.value = '';
+                    return;
+                }
+
+                filteredServices.forEach(service => {
+                    const option = buildOption(service.name || '', service.name || 'Unnamed Service');
+                    serviceSelect.appendChild(option);
+                });
+            }
+
+            if (networkSelect) {
+                networkSelect.addEventListener('change', () => {
+                    populateServices();
+                    serviceSelect.value = '';
+                });
+            }
+
+            populateServices();
+        });
+    </script>
 @endsection
-
-
-
