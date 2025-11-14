@@ -9049,6 +9049,74 @@ class AdminController extends Controller
         ]);
     }
 
+    public function deleteBankTransfer($id)
+    {
+        try {
+            // Get all payments
+            $allPayments = $this->getPaymentsIntoBank();
+            if (!is_array($allPayments)) {
+                $allPayments = [];
+            }
+
+            // Find the transfer transaction
+            $transfer = collect($allPayments)->firstWhere('id', $id);
+            
+            if (!$transfer) {
+                return redirect()->route('admin.banks.transfer.all')->with('error', 'Transfer not found.');
+            }
+
+            // Check if it's a transfer transaction
+            $remark = strtolower($transfer['remark'] ?? '');
+            if (strpos($remark, 'transfer') === false) {
+                return redirect()->route('admin.banks.transfer.all')->with('error', 'This is not a transfer transaction.');
+            }
+
+            // Find the related transaction (debit or credit pair)
+            $transactionNo = $transfer['transaction_no'] ?? '';
+            $relatedTransfer = collect($allPayments)->first(function($t) use ($transactionNo, $transfer) {
+                return ($t['transaction_no'] ?? '') === $transactionNo 
+                    && $t['id'] != $transfer['id']
+                    && $t['type'] != $transfer['type'];
+            });
+
+            if (!$relatedTransfer) {
+                return redirect()->route('admin.banks.transfer.all')->with('error', 'Related transfer transaction not found.');
+            }
+
+            $debitId = $transfer['type'] === 'Debit' ? $transfer['id'] : $relatedTransfer['id'];
+            $creditId = $transfer['type'] === 'Credit' ? $transfer['id'] : $relatedTransfer['id'];
+            $amount = $transfer['amount'] ?? 0;
+            $fromBank = $transfer['type'] === 'Debit' ? $transfer['bank_account'] : $relatedTransfer['bank_account'];
+            $toBank = $transfer['type'] === 'Credit' ? $transfer['bank_account'] : $relatedTransfer['bank_account'];
+
+            // Try to delete from database first
+            $deletedFromDb = false;
+            try {
+                $debitDeleted = \App\Models\PaymentIntoBank::where('id', $debitId)->delete();
+                $creditDeleted = \App\Models\PaymentIntoBank::where('id', $creditId)->delete();
+                $deletedFromDb = ($debitDeleted > 0 || $creditDeleted > 0);
+            } catch (\Exception $dbError) {
+                \Log::warning('Database deletion failed, trying session fallback: ' . $dbError->getMessage());
+            }
+
+            // If database deletion didn't work, try session fallback
+            if (!$deletedFromDb) {
+                $allPayments = array_filter($allPayments, function($payment) use ($debitId, $creditId) {
+                    return ($payment['id'] ?? null) != $debitId && ($payment['id'] ?? null) != $creditId;
+                });
+                $allPayments = array_values($allPayments);
+                session(['payments_into_bank' => $allPayments]);
+                session()->save();
+            }
+
+            return redirect()->route('admin.banks.transfer.all')->with('success', 'Bank transfer deleted successfully! Amount ₹' . number_format($amount, 2) . ' transfer from ' . $fromBank . ' to ' . $toBank . ' has been cancelled.');
+            
+        } catch (\Exception $e) {
+            \Log::error('Error deleting bank transfer: ' . $e->getMessage());
+            return redirect()->route('admin.banks.transfer.all')->with('error', 'Error deleting transfer: ' . $e->getMessage());
+        }
+    }
+
     // Payments Into Bank Management
     private function getPaymentsIntoBank()
     {

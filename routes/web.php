@@ -312,6 +312,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::post('/banks/transfer', [AdminController::class, 'storeBankTransfer'])->name('banks.transfer.store');
     Route::get('/banks/transfer/all', [AdminController::class, 'allBankTransfers'])->name('banks.transfer.all');
     Route::get('/banks/transfer/{id}/view', [AdminController::class, 'viewBankTransfer'])->name('banks.transfer.view');
+    Route::delete('/banks/transfer/{id}', [AdminController::class, 'deleteBankTransfer'])->name('banks.transfer.delete');
     Route::post('/banks/bulk-delete', [AdminController::class, 'bulkDeleteBanks'])->name('banks.bulk-delete');
     Route::post('/banks', [AdminController::class, 'storeBank'])->name('banks.store');
     Route::get('/banks/{id}/view', [AdminController::class, 'viewBank'])->name('banks.view');
