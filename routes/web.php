@@ -166,6 +166,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::get('/networks/all', [AdminController::class, 'allNetworks'])->name('networks.all');
     Route::post('/networks', [AdminController::class, 'storeNetwork'])->name('networks.store');
     Route::post('/networks/bulk-delete', [AdminController::class, 'bulkDeleteNetworks'])->name('networks.bulk-delete');
+    Route::get('/networks/{id}/view', [AdminController::class, 'viewNetwork'])->name('networks.view');
     Route::get('/networks/{id}/edit', [AdminController::class, 'editNetwork'])->name('networks.edit');
     Route::put('/networks/{id}', [AdminController::class, 'updateNetwork'])->name('networks.update');
     Route::post('/networks/{id}/toggle-status', [AdminController::class, 'toggleNetworkStatus'])->name('networks.toggle-status');
@@ -206,6 +207,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::post('/zones/bulk-delete', [AdminController::class, 'bulkDeleteZones'])->name('zones.bulk-delete');
     Route::post('/zones/import', [AdminController::class, 'importZones'])->name('zones.import');
     Route::get('/zones/template/download', [AdminController::class, 'downloadZoneTemplate'])->name('zones.template.download');
+    Route::get('/api/pincodes-by-country', [AdminController::class, 'getPincodesByCountry'])->name('api.pincodes-by-country');
     Route::get('/shipping-charges', [AdminController::class, 'shippingCharges'])->name('shipping-charges');
     Route::get('/shipping-charges/create', [AdminController::class, 'createShippingCharge'])->name('shipping-charges.create');
     Route::get('/shipping-charges/all', [AdminController::class, 'allShippingCharges'])->name('shipping-charges.all');
@@ -279,6 +281,8 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::put('/direct-entry/{id}', [AdminController::class, 'updateDirectEntry'])->name('direct-entry.update');
     Route::delete('/direct-entry/{id}', [AdminController::class, 'deleteDirectEntry'])->name('direct-entry.delete');
     Route::post('/direct-entry/bulk-delete', [AdminController::class, 'bulkDeleteDirectEntry'])->name('direct-entry.bulk-delete');
+    Route::get('/reports', [AdminController::class, 'reportsIndex'])->name('reports.index');
+    Route::get('/reports/{reportType}/content', [AdminController::class, 'getReportContent'])->name('reports.content');
     Route::get('/reports/zone', [AdminController::class, 'zoneReport'])->name('reports.zone');
     Route::get('/reports/formula', [AdminController::class, 'formulaReport'])->name('reports.formula');
     Route::get('/reports/shipping-charges', [AdminController::class, 'shippingChargesReport'])->name('reports.shipping-charges');
@@ -304,8 +308,13 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::get('/banks', [AdminController::class, 'banks'])->name('banks');
     Route::get('/banks/create', [AdminController::class, 'createBank'])->name('banks.create');
     Route::get('/banks/all', [AdminController::class, 'allBanks'])->name('banks.all');
+    Route::get('/banks/transfer', [AdminController::class, 'bankTransfer'])->name('banks.transfer');
+    Route::post('/banks/transfer', [AdminController::class, 'storeBankTransfer'])->name('banks.transfer.store');
+    Route::get('/banks/transfer/all', [AdminController::class, 'allBankTransfers'])->name('banks.transfer.all');
+    Route::get('/banks/transfer/{id}/view', [AdminController::class, 'viewBankTransfer'])->name('banks.transfer.view');
     Route::post('/banks/bulk-delete', [AdminController::class, 'bulkDeleteBanks'])->name('banks.bulk-delete');
     Route::post('/banks', [AdminController::class, 'storeBank'])->name('banks.store');
+    Route::get('/banks/{id}/view', [AdminController::class, 'viewBank'])->name('banks.view');
     Route::get('/banks/{id}/edit', [AdminController::class, 'editBank'])->name('banks.edit');
     Route::put('/banks/{id}', [AdminController::class, 'updateBank'])->name('banks.update');
     Route::delete('/banks/{id}', [AdminController::class, 'deleteBank'])->name('banks.delete');
@@ -315,6 +324,8 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::get('/payments-into-bank/create', [AdminController::class, 'createPaymentIntoBank'])->name('payments-into-bank.create');
     Route::get('/payments-into-bank/all', [AdminController::class, 'allPaymentsIntoBank'])->name('payments-into-bank.all');
     Route::post('/payments-into-bank', [AdminController::class, 'storePaymentIntoBank'])->name('payments-into-bank.store');
+    Route::post('/payments-into-bank/import', [AdminController::class, 'importPaymentsIntoBank'])->name('payments-into-bank.import');
+    Route::get('/payments-into-bank/template/download', [AdminController::class, 'downloadPaymentsIntoBankTemplate'])->name('payments-into-bank.template.download');
     Route::get('/payments-into-bank/{id}/edit', [AdminController::class, 'editPaymentIntoBank'])->name('payments-into-bank.edit');
     Route::put('/payments-into-bank/{id}', [AdminController::class, 'updatePaymentIntoBank'])->name('payments-into-bank.update');
     Route::delete('/payments-into-bank/{id}', [AdminController::class, 'deletePaymentIntoBank'])->name('payments-into-bank.delete');
@@ -327,6 +338,8 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::delete('/payments/{id}', [AdminController::class, 'deletePayment'])->name('payments.delete');
     Route::get('/payments/wallet', [AdminController::class, 'manageWallet'])->name('payments.wallet');
     Route::post('/payments/wallet/bulk', [AdminController::class, 'bulkUpdateWallet'])->name('payments.wallet.bulk');
+    Route::post('/payments/wallet/import', [AdminController::class, 'importWalletTransactions'])->name('payments.wallet.import');
+    Route::get('/payments/wallet/template/download', [AdminController::class, 'downloadWalletTransactionsTemplate'])->name('payments.wallet.template.download');
     Route::get('/payments/gateways', [AdminController::class, 'paymentGateways'])->name('payments.gateways');
     Route::get('/payments/gateways/create', [AdminController::class, 'createPaymentGateway'])->name('payments.gateways.create');
     Route::post('/payments/gateways', [AdminController::class, 'storePaymentGateway'])->name('payments.gateways.store');

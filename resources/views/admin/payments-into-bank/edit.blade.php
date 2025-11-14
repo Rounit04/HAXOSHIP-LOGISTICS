@@ -159,7 +159,12 @@
                             </svg>
                             Category Bank <span class="required">*</span>
                         </label>
-                        <input type="text" name="category_bank" id="category_bank" class="form-input" placeholder="e.g., Salary, Expense, Revenue" value="{{ old('category_bank', $payment['category_bank'] ?? '') }}" required>
+                        <select name="category_bank" id="category_bank" class="form-select" required>
+                            <option value="">Select Category</option>
+                            <option value="Salary" {{ old('category_bank', $payment['category_bank'] ?? '') == 'Salary' ? 'selected' : '' }}>Salary</option>
+                            <option value="Expense" {{ old('category_bank', $payment['category_bank'] ?? '') == 'Expense' ? 'selected' : '' }}>Expense</option>
+                            <option value="Revenue" {{ old('category_bank', $payment['category_bank'] ?? '') == 'Revenue' ? 'selected' : '' }}>Revenue</option>
+                        </select>
                         @error('category_bank')
                             <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                         @enderror

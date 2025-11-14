@@ -122,8 +122,8 @@
                             </svg>
                             AWB No. <span class="required">*</span>
                         </label>
-                        <input type="text" name="awb_no" id="awb_no" class="form-input" value="{{ $upload['awb_no'] }}" required pattern="[a-zA-Z0-9]+" title="No special characters allowed">
-                        <p class="text-xs text-gray-500 mt-1">No duplicate/Special characters allowed</p>
+                        <input type="text" name="awb_no" id="awb_no" class="form-input" value="{{ $upload['awb_no'] }}" required>
+                        <p class="text-xs text-gray-500 mt-1">AWB No. must be unique (no duplicates). Special characters are allowed.</p>
                     </div>
 
                     <!-- Date of Sale -->

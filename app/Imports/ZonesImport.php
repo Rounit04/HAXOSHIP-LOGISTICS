@@ -6,6 +6,7 @@ use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
 use Illuminate\Support\Collection;
+use App\Models\Network;
 
 class ZonesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
 {
@@ -19,6 +20,23 @@ class ZonesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
             $zones = [];
         }
 
+        // Get all networks to validate against
+        $dbNetworks = Network::all();
+        $networkNames = $dbNetworks->pluck('name')->toArray();
+        
+        // Fallback to session networks if database is empty
+        if (empty($networkNames) && session()->has('networks')) {
+            $sessionNetworks = session('networks', []);
+            $networkNames = collect($sessionNetworks)->pluck('name')->toArray();
+        }
+
+        // Get all services to validate against
+        $services = session('services', []);
+        if (!is_array($services)) {
+            $services = [];
+        }
+        $serviceNames = collect($services)->pluck('name')->toArray();
+
         $maxId = count($zones) > 0 ? max(array_column($zones, 'id')) : 0;
 
         foreach ($collection as $row) {
@@ -27,37 +45,63 @@ class ZonesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
                 continue;
             }
 
-            // Check if zone already exists (by pincode, country, network, service combination)
-            $country = $this->getValue($row, ['country', 'country_name']);
             $network = $this->getValue($row, ['network', 'network_name']);
             $service = $this->getValue($row, ['service', 'service_name']);
-
-            $exists = collect($zones)->first(function($zone) use ($pincode, $country, $network, $service) {
-                return $zone['pincode'] == $pincode 
-                    && $zone['country'] == $country 
-                    && $zone['network'] == $network 
-                    && $zone['service'] == $service;
-            });
-
-            if ($exists) {
+            
+            // Skip if network doesn't exist
+            if (empty($network) || !in_array($network, $networkNames)) {
                 continue;
             }
 
-            $maxId++;
-            $zone = $this->getValue($row, ['zone', 'zone_name']);
+            // Skip if service doesn't exist
+            if (empty($service) || !in_array($service, $serviceNames)) {
+                continue;
+            }
+
+            // Check if zone with same pincode already exists - update it instead of creating new
+            $existingZoneIndex = null;
+            foreach ($zones as $index => $existingZone) {
+                if (strcasecmp($existingZone['pincode'] ?? '', $pincode) === 0) {
+                    $existingZoneIndex = $index;
+                    break;
+                }
+            }
+
+            $country = $this->getValue($row, ['country', 'country_name']);
+            $zoneName = $this->getValue($row, ['zone', 'zone_name']);
             $status = $this->getStatus($this->getValue($row, ['status']));
             $remark = $this->getValue($row, ['remark', 'remarks']);
 
-            $zones[] = [
-                'id' => $maxId,
-                'pincode' => $pincode,
-                'country' => $country ?? '',
-                'zone' => $zone ?? '',
-                'network' => $network ?? '',
-                'service' => $service ?? '',
-                'status' => $status,
-                'remark' => $remark ?? '',
-            ];
+            if ($existingZoneIndex !== null) {
+                // Update existing zone with new network and service
+                $existingZone = $zones[$existingZoneIndex];
+                $zones[$existingZoneIndex] = [
+                    'id' => $existingZone['id'],
+                    'pincode' => $pincode,
+                    'country' => $country ?? $existingZone['country'] ?? '',
+                    'zone' => $zoneName ?? $existingZone['zone'] ?? '',
+                    'network' => $network,
+                    'service' => $service,
+                    'status' => $status,
+                    'remark' => $remark ?? $existingZone['remark'] ?? '',
+                    'created_at' => $existingZone['created_at'] ?? now()->toDateTimeString(),
+                    'updated_at' => now()->toDateTimeString(),
+                ];
+            } else {
+                // Create new zone
+                $maxId++;
+                $zones[] = [
+                    'id' => $maxId,
+                    'pincode' => $pincode,
+                    'country' => $country ?? '',
+                    'zone' => $zoneName ?? '',
+                    'network' => $network,
+                    'service' => $service,
+                    'status' => $status,
+                    'remark' => $remark ?? '',
+                    'created_at' => now()->toDateTimeString(),
+                ];
+            }
         }
 
         session(['zones' => $zones]);
@@ -89,4 +133,3 @@ class ZonesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
         return 'Inactive';
     }
 }
-

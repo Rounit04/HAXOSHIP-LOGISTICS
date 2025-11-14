@@ -144,6 +144,95 @@
         </div>
     @endif
 
+    <!-- Search & Filter Section -->
+    <div class="payment-card p-6 mb-6">
+        <h2 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            Search & Filter
+        </h2>
+        
+        <form method="GET" action="{{ route('admin.payments-into-bank.all') }}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Search -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">
+                    <svg class="w-3.5 h-3.5 text-orange-600 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    Search
+                </label>
+                <input type="text" name="search" value="{{ $searchParams['search'] ?? '' }}" class="w-full px-4 py-2 border-2 border-gray-200 rounded-lg text-sm focus:outline-none focus:border-orange-500" placeholder="Search by bank, transaction, category...">
+            </div>
+            
+            <!-- Bank Filter -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">
+                    <svg class="w-3.5 h-3.5 text-orange-600 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                    </svg>
+                    Bank Account
+                </label>
+                <select name="bank" class="w-full px-4 py-2 border-2 border-gray-200 rounded-lg text-sm focus:outline-none focus:border-orange-500">
+                    <option value="">All Banks</option>
+                    @foreach($banks ?? [] as $bank)
+                        <option value="{{ $bank['bank_name'] }} - {{ $bank['account_number'] }}" {{ ($searchParams['bank'] ?? '') == $bank['bank_name'] . ' - ' . $bank['account_number'] ? 'selected' : '' }}>
+                            {{ $bank['bank_name'] }} - {{ $bank['account_number'] }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+            
+            <!-- Mode Filter -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">
+                    <svg class="w-3.5 h-3.5 text-orange-600 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                    </svg>
+                    Mode of Payment
+                </label>
+                <select name="mode" class="w-full px-4 py-2 border-2 border-gray-200 rounded-lg text-sm focus:outline-none focus:border-orange-500">
+                    <option value="">All Modes</option>
+                    <option value="UPI" {{ ($searchParams['mode'] ?? '') == 'UPI' ? 'selected' : '' }}>UPI</option>
+                    <option value="Cash" {{ ($searchParams['mode'] ?? '') == 'Cash' ? 'selected' : '' }}>Cash</option>
+                    <option value="Netf" {{ ($searchParams['mode'] ?? '') == 'Netf' ? 'selected' : '' }}>Netf</option>
+                </select>
+            </div>
+            
+            <!-- Type Filter -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">
+                    <svg class="w-3.5 h-3.5 text-orange-600 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Type
+                </label>
+                <select name="type" class="w-full px-4 py-2 border-2 border-gray-200 rounded-lg text-sm focus:outline-none focus:border-orange-500">
+                    <option value="">All Types</option>
+                    <option value="Credit" {{ ($searchParams['type'] ?? '') == 'Credit' ? 'selected' : '' }}>Credit</option>
+                    <option value="Debit" {{ ($searchParams['type'] ?? '') == 'Debit' ? 'selected' : '' }}>Debit</option>
+                </select>
+            </div>
+            
+            <!-- Search Button -->
+            <div class="md:col-span-4 flex items-end gap-2">
+                <button type="submit" class="admin-btn-primary px-6 py-2.5 text-sm font-semibold flex-1 md:flex-none">
+                    <div class="flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <span>Search</span>
+                    </div>
+                </button>
+                @if($searchParams['search'] ?? '' || $searchParams['bank'] ?? '' || $searchParams['mode'] ?? '' || $searchParams['type'] ?? '')
+                    <a href="{{ route('admin.payments-into-bank.all') }}" class="px-4 py-2.5 rounded-lg border-2 border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition text-sm">
+                        Clear
+                    </a>
+                @endif
+            </div>
+        </form>
+    </div>
+
     <div class="payment-card">
         @if(count($payments) > 0)
             <div class="overflow-x-auto rounded-lg border border-gray-200">
@@ -163,7 +252,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($payments as $payment)
+                        @forelse($payments as $payment)
                             <tr>
                                 <td class="font-bold text-gray-900">#{{ $payment['id'] ?? '-' }}</td>
                                 <td class="font-semibold text-gray-700">{{ $payment['bank_account'] ?? '-' }}</td>
@@ -197,25 +286,37 @@
                                     </div>
                                 </td>
                             </tr>
-                        @endforeach
+                        @empty
+                            <tr>
+                                <td colspan="10" class="text-center py-8">
+                                    <div class="empty-state">
+                                        <div class="empty-state-icon">
+                                            <svg class="w-10 h-10 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+                                            </svg>
+                                        </div>
+                                        <h3 class="text-lg font-bold text-gray-900 mb-2">No Payments Found</h3>
+                                        <p class="text-gray-600 mb-4">
+                                            @if($searchParams['search'] ?? '' || $searchParams['bank'] ?? '' || $searchParams['mode'] ?? '' || $searchParams['type'] ?? '')
+                                                No payments match your search criteria.
+                                            @else
+                                                Get started by adding your first payment into bank.
+                                            @endif
+                                        </p>
+                                        @if(!($searchParams['search'] ?? '' || $searchParams['bank'] ?? '' || $searchParams['mode'] ?? '' || $searchParams['type'] ?? ''))
+                                            <a href="{{ route('admin.payments-into-bank.create') }}" class="admin-btn-primary px-6 py-3 text-sm font-semibold inline-flex items-center gap-2">
+                                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                                                </svg>
+                                                <span>Add Payment</span>
+                                            </a>
+                                        @endif
+                                    </div>
+                                </td>
+                            </tr>
+                        @endforelse
                     </tbody>
                 </table>
-            </div>
-        @else
-            <div class="empty-state">
-                <div class="empty-state-icon">
-                    <svg class="w-10 h-10 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
-                    </svg>
-                </div>
-                <h3 class="text-lg font-bold text-gray-900 mb-2">No Payments Found</h3>
-                <p class="text-gray-600 mb-4">Get started by adding your first payment into bank.</p>
-                <a href="{{ route('admin.payments-into-bank.create') }}" class="admin-btn-primary px-6 py-3 text-sm font-semibold inline-flex items-center gap-2">
-                    <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-                    </svg>
-                    <span>Add Payment</span>
-                </a>
             </div>
         @endif
     </div>

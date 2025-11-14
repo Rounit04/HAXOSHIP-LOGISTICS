@@ -226,15 +226,19 @@
                         // Show submenu
                         submenu.classList.remove('hidden');
                         submenu.style.display = 'block';
-                        submenu.style.maxHeight = '200px';
+                        // Use larger max-height for reports submenu to show all items including Bank Report
+                        const maxHeight = submenuId === 'reports-submenu' ? '800px' : '200px';
+                        const maxHeightClass = submenuId === 'reports-submenu' ? 'max-h-[800px]' : 'max-h-40';
+                        submenu.style.maxHeight = maxHeight;
                         submenu.style.opacity = '1';
                         setTimeout(() => {
                             submenu.classList.remove('max-h-0', 'opacity-0');
-                            submenu.classList.add('max-h-40', 'opacity-100');
+                            submenu.classList.add(maxHeightClass, 'opacity-100');
                         }, 10);
                     } else {
                         // Hide submenu
-                        submenu.classList.remove('max-h-40', 'opacity-100');
+                        const maxHeightClass = submenuId === 'reports-submenu' ? 'max-h-[800px]' : 'max-h-40';
+                        submenu.classList.remove(maxHeightClass, 'opacity-100');
                         submenu.classList.add('max-h-0', 'opacity-0');
                         submenu.style.maxHeight = '0';
                         submenu.style.opacity = '0';
@@ -467,10 +471,10 @@
                     if (reportsSubmenu) {
                         reportsSubmenu.classList.remove('hidden');
                         reportsSubmenu.style.display = 'block';
-                        reportsSubmenu.style.maxHeight = '600px';
+                        reportsSubmenu.style.maxHeight = '800px';
                         reportsSubmenu.style.opacity = '1';
                         reportsSubmenu.classList.remove('max-h-0', 'opacity-0');
-                        reportsSubmenu.classList.add('max-h-96', 'opacity-100');
+                        reportsSubmenu.classList.add('max-h-[800px]', 'opacity-100');
                         if (reportsArrow) {
                             reportsArrow.classList.add('rotate-90');
                         }
@@ -1262,7 +1266,7 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
                                 </svg>
                             </div>
-                            <div id="reports-submenu" class="mt-2 ml-2 space-y-1.5 overflow-hidden transition-all duration-300" style="max-height: 0; opacity: 0; display: none;">
+                            <div id="reports-submenu" class="mt-2 ml-2 space-y-1.5 overflow-y-auto transition-all duration-300" style="max-height: 0; opacity: 0; display: none;">
                                 <a href="{{ route('admin.reports.zone') }}" class="submenu-link flex items-center gap-3 px-4 py-3 rounded-lg text-sm transition-all duration-300 @if(request()->routeIs('admin.reports.zone')) active @else text-gray-700 @endif">
                                     @if(request()->routeIs('admin.reports.zone'))
                                         <div class="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-orange-500 to-orange-400 rounded-r-lg"></div>
@@ -1371,7 +1375,7 @@
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                         </svg>
                                     </div>
-                                    <span class="font-semibold @if(request()->routeIs('admin.reports.bank')) text-white @else text-gray-700 @endif">Bank Report (Bank Wise)</span>
+                                    <span class="font-semibold @if(request()->routeIs('admin.reports.bank')) text-white @else text-gray-700 @endif">Bank Report</span>
                                 </a>
                                 <a href="{{ route('admin.reports.wallet') }}" class="submenu-link flex items-center gap-3 px-4 py-3 rounded-lg text-sm transition-all duration-300 @if(request()->routeIs('admin.reports.wallet')) active @else text-gray-700 @endif">
                                     @if(request()->routeIs('admin.reports.wallet'))
@@ -1427,6 +1431,17 @@
                                         </svg>
                                     </div>
                                     <span class="font-semibold @if(request()->routeIs('admin.banks.all') || request()->routeIs('admin.banks.edit')) text-white @else text-gray-700 @endif">All Banks</span>
+                                </a>
+                                <a href="{{ route('admin.banks.transfer') }}" class="submenu-link flex items-center gap-3 px-4 py-3 rounded-lg text-sm transition-all duration-300 @if(request()->routeIs('admin.banks.transfer')) active @else text-gray-700 @endif">
+                                    @if(request()->routeIs('admin.banks.transfer'))
+                                        <div class="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-orange-500 to-orange-400 rounded-r-lg"></div>
+                                    @endif
+                                    <div class="w-9 h-9 rounded-lg flex items-center justify-center transition-all flex-shrink-0" style="@if(request()->routeIs('admin.banks.transfer')) background: rgba(255,255,255,0.2); backdrop-filter: blur(10px); @else background: rgba(255, 117, 15, 0.08); @endif">
+                                        <svg class="w-4.5 h-4.5 @if(request()->routeIs('admin.banks.transfer')) text-white @else text-orange-600 @endif" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                                        </svg>
+                                    </div>
+                                    <span class="font-semibold @if(request()->routeIs('admin.banks.transfer')) text-white @else text-gray-700 @endif">Bank Transfer</span>
                                 </a>
                             </div>
                         </div>

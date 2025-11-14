@@ -6,6 +6,7 @@ use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
 use Illuminate\Support\Collection;
+use App\Models\Network;
 
 class ServicesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
 {
@@ -19,6 +20,16 @@ class ServicesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
             $services = [];
         }
 
+        // Get all networks to validate against
+        $dbNetworks = Network::all();
+        $networkNames = $dbNetworks->pluck('name')->toArray();
+        
+        // Fallback to session networks if database is empty
+        if (empty($networkNames) && session()->has('networks')) {
+            $sessionNetworks = session('networks', []);
+            $networkNames = collect($sessionNetworks)->pluck('name')->toArray();
+        }
+
         $maxId = count($services) > 0 ? max(array_column($services, 'id')) : 0;
 
         foreach ($collection as $row) {
@@ -27,17 +38,24 @@ class ServicesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
                 continue; // Skip rows without service name
             }
 
-            // Check if service already exists
-            $exists = collect($services)->first(function($service) use ($serviceName) {
-                return strcasecmp($service['name'], $serviceName) === 0;
+            $network = $this->getValue($row, ['network', 'network_name']);
+            
+            // Skip if network doesn't exist
+            if (empty($network) || !in_array($network, $networkNames)) {
+                continue; // Skip services whose network doesn't exist
+            }
+
+            // Check if service already exists (same name AND same network)
+            $exists = collect($services)->first(function($service) use ($serviceName, $network) {
+                return strcasecmp($service['name'] ?? '', $serviceName) === 0 &&
+                       strcasecmp($service['network'] ?? '', $network) === 0;
             });
 
             if ($exists) {
-                continue; // Skip duplicate
+                continue; // Skip duplicate (same service name and network combination)
             }
 
             $maxId++;
-            $network = $this->getValue($row, ['network', 'network_name']);
             $transitTime = $this->getValue($row, ['transit_time', 'transit time']);
             $itemsAllowed = $this->getValue($row, ['items_allowed', 'items allowed']);
             $status = $this->getStatus($this->getValue($row, ['status']));
@@ -50,7 +68,7 @@ class ServicesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
             $services[] = [
                 'id' => $maxId,
                 'name' => $serviceName,
-                'network' => $network ?? '',
+                'network' => $network,
                 'transit_time' => $transitTime ?? '',
                 'items_allowed' => $itemsAllowed ?? '',
                 'status' => $status,

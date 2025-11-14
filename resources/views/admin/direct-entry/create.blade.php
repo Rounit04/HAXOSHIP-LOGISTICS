@@ -187,7 +187,9 @@
                                 </svg>
                                 Origin Pin <span class="required">*</span>
                             </label>
-                            <input type="text" name="origin_pin" id="origin_pin" class="form-input" placeholder="e.g., 400001" required value="{{ old('origin_pin') }}">
+                            <select name="origin_pin" id="origin_pin" class="form-select" required>
+                                <option value="">Select Origin Country First</option>
+                            </select>
                             @error('origin_pin')
                                 <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                             @enderror
@@ -199,7 +201,9 @@
                                 </svg>
                                 Destination Pin <span class="required">*</span>
                             </label>
-                            <input type="text" name="destination_pin" id="destination_pin" class="form-input" placeholder="e.g., 10001" required value="{{ old('destination_pin') }}">
+                            <select name="destination_pin" id="destination_pin" class="form-select" required>
+                                <option value="">Select Destination Country First</option>
+                            </select>
                             @error('destination_pin')
                                 <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                             @enderror
@@ -407,6 +411,57 @@
     </div>
 
     <script>
+        // API endpoint for fetching pincodes by country
+        const pincodeApiUrl = '{{ route("admin.api.pincodes-by-country") }}';
+
+        // Update pincode options based on country selection
+        async function updatePincodes(selectElement, country) {
+            if (!country) {
+                selectElement.innerHTML = '<option value="">Select Country First</option>';
+                return;
+            }
+
+            selectElement.innerHTML = '<option value="">Loading...</option>';
+            selectElement.disabled = true;
+
+            try {
+                const response = await fetch(`${pincodeApiUrl}?country=${encodeURIComponent(country)}`);
+                const result = await response.json();
+
+                if (result.success && result.data) {
+                    selectElement.innerHTML = '<option value="">Select Pincode</option>';
+                    result.data.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.pincode;
+                        // Show pincode with zones if available
+                        const zonesText = item.zones && item.zones.length > 0 
+                            ? ` (${item.zones.join(', ')})` 
+                            : '';
+                        option.textContent = item.pincode + zonesText;
+                        option.setAttribute('data-zones', JSON.stringify(item.zones || []));
+                        selectElement.appendChild(option);
+                    });
+                } else {
+                    selectElement.innerHTML = '<option value="">No pincodes found</option>';
+                }
+            } catch (error) {
+                console.error('Error fetching pincodes:', error);
+                selectElement.innerHTML = '<option value="">Error loading pincodes</option>';
+            } finally {
+                selectElement.disabled = false;
+            }
+        }
+
+        // Origin country change
+        document.getElementById('origin')?.addEventListener('change', function() {
+            updatePincodes(document.getElementById('origin_pin'), this.value);
+        });
+
+        // Destination country change
+        document.getElementById('destination')?.addEventListener('change', function() {
+            updatePincodes(document.getElementById('destination_pin'), this.value);
+        });
+
         // Services data for filtering
         const allServices = @json($services);
         

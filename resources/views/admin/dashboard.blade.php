@@ -378,21 +378,15 @@
                 Bank Account Balance
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                @foreach($bankBalances as $bank)
                 <div class="metric-item">
-                    <p class="metric-label">Account 1</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
+                    <p class="metric-label">{{ $bank['name'] }}</p>
+                    <p class="metric-value">{{ currency($bank['balance']) }}</p>
                 </div>
-                <div class="metric-item">
-                    <p class="metric-label">Account 2</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
-                </div>
-                <div class="metric-item">
-                    <p class="metric-label">Account 3</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
-                </div>
+                @endforeach
                 <div class="total-card">
                     <p class="metric-label">Total Balance</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
+                    <p class="metric-value">{{ currency($totalBankBalance ?? 0) }}</p>
                 </div>
             </div>
         </div>
@@ -406,22 +400,12 @@
                 Network Wallet Balance
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                @foreach($networkBalances as $network)
                 <div class="metric-item">
-                    <p class="metric-label">Network 1</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
+                    <p class="metric-label">{{ $network['name'] }}</p>
+                    <p class="metric-value">{{ currency($network['balance']) }}</p>
                 </div>
-                <div class="metric-item">
-                    <p class="metric-label">Network 2</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
-                </div>
-                <div class="metric-item">
-                    <p class="metric-label">Network 3</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
-                </div>
-                <div class="metric-item">
-                    <p class="metric-label">Network 4</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
-                </div>
+                @endforeach
             </div>
         </div>
 
@@ -436,23 +420,23 @@
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 <div class="metric-item">
                     <p class="metric-label">Fuel</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
+                    <p class="metric-value">{{ currency($expenseCategories['Fuel'] ?? 0) }}</p>
                 </div>
                 <div class="metric-item">
                     <p class="metric-label">Maintenance</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
+                    <p class="metric-value">{{ currency($expenseCategories['Maintenance'] ?? 0) }}</p>
                 </div>
                 <div class="metric-item">
                     <p class="metric-label">Salaries</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
+                    <p class="metric-value">{{ currency($expenseCategories['Salaries'] ?? 0) }}</p>
                 </div>
                 <div class="metric-item">
                     <p class="metric-label">Other</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
+                    <p class="metric-value">{{ currency($expenseCategories['Other'] ?? 0) }}</p>
                 </div>
                 <div class="total-card">
                     <p class="metric-label">Total Expense</p>
-                    <p class="metric-value">{{ currency(0) }}</p>
+                    <p class="metric-value">{{ currency($totalExpense ?? 0) }}</p>
                 </div>
             </div>
         </div>

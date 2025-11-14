@@ -246,52 +246,84 @@
                         <div class="detail-value"><span class="badge">{{ $awb['shipment_type'] }}</span></div>
                     </div>
                     @endif
+                    @if(!empty($awb['origin']))
+                    <div class="detail-row">
+                        <div class="detail-label">Origin</div>
+                        <div class="detail-value"><span class="badge">{{ $awb['origin'] }}</span></div>
+                    </div>
+                    @endif
                     @if(!empty($awb['destination']))
                     <div class="detail-row">
                         <div class="detail-label">Destination</div>
                         <div class="detail-value"><span class="badge">{{ $awb['destination'] }}</span></div>
                     </div>
                     @endif
-                    @if(!empty($awb['consignee_name']))
+                    @if(!empty($awb['consignee']) || !empty($awb['consignee_name']))
                     <div class="detail-row">
-                        <div class="detail-label">Consignee Name</div>
-                        <div class="detail-value">{{ $awb['consignee_name'] }}</div>
+                        <div class="detail-label">Consignee</div>
+                        <div class="detail-value">{{ $awb['consignee'] ?? $awb['consignee_name'] ?? 'N/A' }}</div>
                     </div>
                     @endif
-                    @if(!empty($awb['origin_pin']))
+                    @if(!empty($awb['consignor']) || !empty($awb['consignor_name']))
                     <div class="detail-row">
-                        <div class="detail-label">Origin Pin</div>
-                        <div class="detail-value"><span class="badge">{{ $awb['origin_pin'] }}</span></div>
+                        <div class="detail-label">Consignor</div>
+                        <div class="detail-value">{{ $awb['consignor'] ?? $awb['consignor_name'] ?? 'N/A' }}</div>
                     </div>
                     @endif
-                    @if(!empty($awb['destination_pin']))
+                    @if(!empty($awb['origin_zone_pincode']) || !empty($awb['origin_pin']))
                     <div class="detail-row">
-                        <div class="detail-label">Destination Pin</div>
-                        <div class="detail-value"><span class="badge">{{ $awb['destination_pin'] }}</span></div>
+                        <div class="detail-label">Origin Pincode</div>
+                        <div class="detail-value"><span class="badge">{{ $awb['origin_zone_pincode'] ?? $awb['origin_pin'] ?? 'N/A' }}</span></div>
                     </div>
                     @endif
-                    @if(!empty($awb['pieces']))
+                    @if(!empty($awb['destination_zone_pincode']) || !empty($awb['destination_pin']))
+                    <div class="detail-row">
+                        <div class="detail-label">Destination Pincode</div>
+                        <div class="detail-value"><span class="badge">{{ $awb['destination_zone_pincode'] ?? $awb['destination_pin'] ?? 'N/A' }}</span></div>
+                    </div>
+                    @endif
+                    @if(!empty($awb['origin_zone']))
+                    <div class="detail-row">
+                        <div class="detail-label">Origin Zone</div>
+                        <div class="detail-value"><span class="badge">{{ $awb['origin_zone'] }}</span></div>
+                    </div>
+                    @endif
+                    @if(!empty($awb['destination_zone']))
+                    <div class="detail-row">
+                        <div class="detail-label">Destination Zone</div>
+                        <div class="detail-value"><span class="badge">{{ $awb['destination_zone'] }}</span></div>
+                    </div>
+                    @endif
+                    @if(!empty($awb['pk']) || !empty($awb['pieces']))
                     <div class="detail-row">
                         <div class="detail-label">Pieces</div>
-                        <div class="detail-value">{{ $awb['pieces'] }}</div>
+                        <div class="detail-value">{{ $awb['pk'] ?? $awb['pieces'] ?? 'N/A' }}</div>
                     </div>
                     @endif
-                    @if(!empty($awb['weight']))
+                    @if(!empty($awb['actual_weight']) || !empty($awb['weight']))
                     <div class="detail-row">
-                        <div class="detail-label">Weight (KG)</div>
-                        <div class="detail-value">{{ number_format($awb['weight'], 2) }} KG</div>
+                        <div class="detail-label">Actual Weight (KG)</div>
+                        <div class="detail-value">{{ number_format($awb['actual_weight'] ?? $awb['weight'] ?? 0, 2) }} KG</div>
                     </div>
                     @endif
-                    @if(!empty($awb['vel_weight']))
+                    @if(!empty($awb['volumetric_weight']) || !empty($awb['vel_weight']))
                     <div class="detail-row">
                         <div class="detail-label">Volumetric Weight (KG)</div>
-                        <div class="detail-value">{{ number_format($awb['vel_weight'], 2) }} KG</div>
+                        <div class="detail-value">{{ number_format($awb['volumetric_weight'] ?? $awb['vel_weight'] ?? 0, 2) }} KG</div>
                     </div>
                     @endif
-                    @if(!empty($awb['chr_weight']))
+                    @if(!empty($awb['chargeable_weight']) || !empty($awb['chr_weight']))
                     <div class="detail-row">
                         <div class="detail-label">Chargeable Weight (KG)</div>
-                        <div class="detail-value">{{ number_format($awb['chr_weight'], 2) }} KG</div>
+                        <div class="detail-value">{{ number_format($awb['chargeable_weight'] ?? $awb['chr_weight'] ?? 0, 2) }} KG</div>
+                    </div>
+                    @endif
+                    @if(!empty($awb['amour']))
+                    <div class="detail-row">
+                        <div class="detail-label">Amount</div>
+                        <div class="detail-value">
+                            <span class="amount-badge">₹{{ number_format($awb['amour'], 2) }}</span>
+                        </div>
                     </div>
                     @endif
                     @if(!empty($awb['clearance']))
@@ -306,16 +338,58 @@
                         <div class="detail-value">{{ $awb['operation_remark'] }}</div>
                     </div>
                     @endif
-                    @if(!empty($awb['network']))
+                    @if(!empty($awb['network_name']) || !empty($awb['network']))
                     <div class="detail-row">
                         <div class="detail-label">Network</div>
-                        <div class="detail-value"><span class="badge">{{ $awb['network'] }}</span></div>
+                        <div class="detail-value"><span class="badge">{{ $awb['network_name'] ?? $awb['network'] ?? 'N/A' }}</span></div>
                     </div>
                     @endif
-                    @if(!empty($awb['service']))
+                    @if(!empty($awb['service_name']) || !empty($awb['service']))
                     <div class="detail-row">
                         <div class="detail-label">Service</div>
-                        <div class="detail-value"><span class="badge">{{ $awb['service'] }}</span></div>
+                        <div class="detail-value"><span class="badge">{{ $awb['service_name'] ?? $awb['service'] ?? 'N/A' }}</span></div>
+                    </div>
+                    @endif
+                    @if(!empty($zoneInfo))
+                        @if(!empty($zoneInfo['origin']))
+                        <div class="detail-row">
+                            <div class="detail-label">Origin Zone</div>
+                            <div class="detail-value">
+                                <span class="badge">{{ $zoneInfo['origin']['zone'] ?? 'N/A' }}</span>
+                                @if(!empty($zoneInfo['origin']['country']))
+                                    <span class="text-gray-500 text-xs ml-2">({{ $zoneInfo['origin']['country'] }})</span>
+                                @endif
+                            </div>
+                        </div>
+                        @endif
+                        @if(!empty($zoneInfo['destination']))
+                        <div class="detail-row">
+                            <div class="detail-label">Destination Zone</div>
+                            <div class="detail-value">
+                                <span class="badge">{{ $zoneInfo['destination']['zone'] ?? 'N/A' }}</span>
+                                @if(!empty($zoneInfo['destination']['country']))
+                                    <span class="text-gray-500 text-xs ml-2">({{ $zoneInfo['destination']['country'] }})</span>
+                                @endif
+                            </div>
+                        </div>
+                        @endif
+                    @endif
+                    @if(!empty($networkTransactions) && count($networkTransactions) > 0)
+                    <div class="detail-row">
+                        <div class="detail-label">Total Transaction Amount</div>
+                        <div class="detail-value">
+                            <span class="amount-badge">₹{{ number_format($totalAmount, 2) }}</span>
+                        </div>
+                    </div>
+                    @endif
+                    @if($supportTicketCount > 0)
+                    <div class="detail-row">
+                        <div class="detail-label">Support Tickets/Queries</div>
+                        <div class="detail-value">
+                            <span class="badge" style="background: rgba(239, 68, 68, 0.1); color: #dc2626;">
+                                {{ $supportTicketCount }} {{ $supportTicketCount == 1 ? 'Query' : 'Queries' }}
+                            </span>
+                        </div>
                     </div>
                     @endif
                     @if(!empty($awb['display_service_name']))
@@ -368,6 +442,90 @@
                     @endif
                 </div>
             </div>
+
+            <!-- Network Transactions Section -->
+            @if(!empty($networkTransactions) && count($networkTransactions) > 0)
+            <div class="awb-details-card p-6 mt-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+                    <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Network Transactions (Amounts)
+                </h2>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="bg-gray-50 border-b border-gray-200">
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Network</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Type</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Transaction Type</th>
+                                <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Amount</th>
+                                <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Balance After</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Description</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            @foreach($networkTransactions as $transaction)
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 text-sm text-gray-700">
+                                    {{ \Carbon\Carbon::parse($transaction['created_at'])->format('d M Y, h:i A') }}
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span class="badge">{{ $transaction['network_name'] }}</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span class="badge" style="background: {{ $transaction['type'] == 'credit' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)' }}; color: {{ $transaction['type'] == 'credit' ? '#059669' : '#dc2626' }};">
+                                        {{ ucfirst($transaction['type']) }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-sm text-gray-700">
+                                    {{ ucfirst(str_replace('_', ' ', $transaction['transaction_type'])) }}
+                                </td>
+                                <td class="px-4 py-3 text-sm font-semibold text-right {{ $transaction['type'] == 'credit' ? 'text-green-600' : 'text-red-600' }}">
+                                    {{ $transaction['type'] == 'credit' ? '+' : '-' }}₹{{ number_format($transaction['amount'], 2) }}
+                                </td>
+                                <td class="px-4 py-3 text-sm text-gray-700 text-right">
+                                    ₹{{ number_format($transaction['balance_after'], 2) }}
+                                </td>
+                                <td class="px-4 py-3 text-sm text-gray-600">
+                                    {{ $transaction['description'] ?? 'N/A' }}
+                                </td>
+                            </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot class="bg-gray-50">
+                            <tr>
+                                <td colspan="4" class="px-4 py-3 text-sm font-semibold text-gray-900 text-right">Total Amount:</td>
+                                <td class="px-4 py-3 text-sm font-bold text-right text-orange-600">
+                                    ₹{{ number_format($totalAmount, 2) }}
+                                </td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+            @endif
+
+            <!-- Support Tickets Section -->
+            @if($supportTicketCount > 0)
+            <div class="awb-details-card p-6 mt-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Support Tickets/Queries
+                </h2>
+                <div class="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                    <p class="text-sm text-gray-700">
+                        <span class="font-semibold text-orange-600">{{ $supportTicketCount }}</span> 
+                        {{ $supportTicketCount == 1 ? 'query has been' : 'queries have been' }} raised against this AWB number.
+                    </p>
+                </div>
+            </div>
+            @endif
         @else
             <div class="awb-details-card p-6">
                 <div class="empty-state">

@@ -159,7 +159,7 @@
                     @csrf
                     @method('PUT')
 
-                    <!-- Origin & Origin Zone -->
+                    <!-- Origin, Origin Pincode & Origin Zone -->
                     <div class="form-grid">
                         <div class="form-group">
                             <label class="form-label">
@@ -181,18 +181,27 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
                                 </svg>
+                                Origin Pincode <span class="required">*</span>
+                            </label>
+                            <select name="origin_pincode" id="origin_pincode" class="form-select" required>
+                                <option value="">Select Origin Country First</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
                                 Origin Zone <span class="required">*</span>
                             </label>
                             <select name="origin_zone" id="origin_zone" class="form-select" required>
-                                <option value="">Select Origin Zone</option>
-                                @foreach($zoneOptions as $zone)
-                                    <option value="{{ $zone }}" {{ $charge['origin_zone'] == $zone ? 'selected' : '' }}>{{ $zone }}</option>
-                                @endforeach
+                                <option value="">Select Origin Pincode First</option>
                             </select>
                         </div>
                     </div>
 
-                    <!-- Destination & Destination Zone -->
+                    <!-- Destination, Destination Pincode & Destination Zone -->
                     <div class="form-grid">
                         <div class="form-group">
                             <label class="form-label">
@@ -215,13 +224,22 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
                                 </svg>
+                                Destination Pincode <span class="required">*</span>
+                            </label>
+                            <select name="destination_pincode" id="destination_pincode" class="form-select" required>
+                                <option value="">Select Destination Country First</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
                                 Destination Zone <span class="required">*</span>
                             </label>
                             <select name="destination_zone" id="destination_zone" class="form-select" required>
-                                <option value="">Select Destination Zone</option>
-                                @foreach($zoneOptions as $zone)
-                                    <option value="{{ $zone }}" {{ $charge['destination_zone'] == $zone ? 'selected' : '' }}>{{ $zone }}</option>
-                                @endforeach
+                                <option value="">Select Destination Pincode First</option>
                             </select>
                         </div>
                     </div>
@@ -444,6 +462,127 @@
 
         minWeightInput.addEventListener('input', validateWeight);
         maxWeightInput.addEventListener('input', validateWeight);
+
+        // API endpoint for fetching pincodes by country
+        const pincodeApiUrl = '{{ route("admin.api.pincodes-by-country") }}';
+        const currentOriginPincode = '{{ $charge["origin_pincode"] ?? "" }}';
+        const currentOriginZone = '{{ $charge["origin_zone"] ?? "" }}';
+        const currentDestinationPincode = '{{ $charge["destination_pincode"] ?? "" }}';
+        const currentDestinationZone = '{{ $charge["destination_zone"] ?? "" }}';
+
+        // Update pincode options based on country selection
+        async function updatePincodes(selectElement, country, selectedValue = '') {
+            if (!country) {
+                selectElement.innerHTML = '<option value="">Select Country First</option>';
+                return;
+            }
+
+            selectElement.innerHTML = '<option value="">Loading...</option>';
+            selectElement.disabled = true;
+
+            try {
+                const response = await fetch(`${pincodeApiUrl}?country=${encodeURIComponent(country)}`);
+                const result = await response.json();
+
+                if (result.success && result.data) {
+                    selectElement.innerHTML = '<option value="">Select Pincode</option>';
+                    result.data.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.pincode;
+                        // Show pincode with zones if available
+                        const zonesText = item.zones && item.zones.length > 0 
+                            ? ` (${item.zones.join(', ')})` 
+                            : '';
+                        option.textContent = item.pincode + zonesText;
+                        option.setAttribute('data-zones', JSON.stringify(item.zones || []));
+                        if (selectedValue && item.pincode == selectedValue) {
+                            option.selected = true;
+                        }
+                        selectElement.appendChild(option);
+                    });
+                } else {
+                    selectElement.innerHTML = '<option value="">No pincodes found</option>';
+                }
+            } catch (error) {
+                console.error('Error fetching pincodes:', error);
+                selectElement.innerHTML = '<option value="">Error loading pincodes</option>';
+            } finally {
+                selectElement.disabled = false;
+            }
+        }
+
+        // Update zone options based on pincode selection
+        function updateZones(zoneSelectElement, pincodeSelectElement, selectedZone = '') {
+            const selectedOption = pincodeSelectElement.options[pincodeSelectElement.selectedIndex];
+            if (!selectedOption || !selectedOption.value) {
+                zoneSelectElement.innerHTML = '<option value="">Select Pincode First</option>';
+                return;
+            }
+
+            const zonesData = selectedOption.getAttribute('data-zones');
+            if (zonesData) {
+                try {
+                    const zones = JSON.parse(zonesData);
+                    zoneSelectElement.innerHTML = '<option value="">Select Zone</option>';
+                    zones.forEach(zone => {
+                        const option = document.createElement('option');
+                        option.value = zone;
+                        option.textContent = zone;
+                        if (selectedZone && zone == selectedZone) {
+                            option.selected = true;
+                        }
+                        zoneSelectElement.appendChild(option);
+                    });
+                } catch (e) {
+                    zoneSelectElement.innerHTML = '<option value="">No zones available</option>';
+                }
+            } else {
+                zoneSelectElement.innerHTML = '<option value="">No zones available</option>';
+            }
+        }
+
+        // Origin country change
+        document.getElementById('origin')?.addEventListener('change', function() {
+            updatePincodes(document.getElementById('origin_pincode'), this.value, currentOriginPincode);
+            document.getElementById('origin_zone').innerHTML = '<option value="">Select Origin Pincode First</option>';
+        });
+
+        // Origin pincode change
+        document.getElementById('origin_pincode')?.addEventListener('change', function() {
+            updateZones(document.getElementById('origin_zone'), this, currentOriginZone);
+        });
+
+        // Destination country change
+        document.getElementById('destination')?.addEventListener('change', function() {
+            updatePincodes(document.getElementById('destination_pincode'), this.value, currentDestinationPincode);
+            document.getElementById('destination_zone').innerHTML = '<option value="">Select Destination Pincode First</option>';
+        });
+
+        // Destination pincode change
+        document.getElementById('destination_pincode')?.addEventListener('change', function() {
+            updateZones(document.getElementById('destination_zone'), this, currentDestinationZone);
+        });
+
+        // Load pincodes and zones on page load if countries are already selected
+        document.addEventListener('DOMContentLoaded', function() {
+            const originCountry = document.getElementById('origin')?.value;
+            const destinationCountry = document.getElementById('destination')?.value;
+            
+            if (originCountry) {
+                updatePincodes(document.getElementById('origin_pincode'), originCountry, currentOriginPincode).then(() => {
+                    if (currentOriginPincode) {
+                        updateZones(document.getElementById('origin_zone'), document.getElementById('origin_pincode'), currentOriginZone);
+                    }
+                });
+            }
+            if (destinationCountry) {
+                updatePincodes(document.getElementById('destination_pincode'), destinationCountry, currentDestinationPincode).then(() => {
+                    if (currentDestinationPincode) {
+                        updateZones(document.getElementById('destination_zone'), document.getElementById('destination_pincode'), currentDestinationZone);
+                    }
+                });
+            }
+        });
 
         // Form submission with AJAX
         document.getElementById('shippingChargeForm').addEventListener('submit', function(e) {

@@ -158,6 +158,45 @@
                     </div>
                 @endif
 
+                <!-- Bulk Upload Section -->
+                <div class="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                            </svg>
+                            Bulk Upload Wallet Transactions
+                        </h3>
+                        <a href="{{ route('admin.payments.wallet.template.download') }}" class="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            Download Template
+                        </a>
+                    </div>
+                    <form method="POST" action="{{ route('admin.payments.wallet.import') }}" enctype="multipart/form-data">
+                        @csrf
+                        <div class="flex items-center gap-3">
+                            <input type="file" name="file" accept=".xlsx,.xls,.csv" class="flex-1 text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" required>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                                </svg>
+                                Upload
+                            </button>
+                        </div>
+                    </form>
+                    <p class="text-xs text-gray-600 mt-2">
+                        <span class="font-semibold">Note:</span> Upload Excel/CSV file with wallet transaction data. Only valid AWBs and networks will be imported.
+                    </p>
+                </div>
+
+                <div class="mb-4 flex items-center gap-4">
+                    <div class="flex-1 border-t border-gray-300"></div>
+                    <span class="text-xs font-semibold text-gray-500 uppercase">OR</span>
+                    <div class="flex-1 border-t border-gray-300"></div>
+                </div>
+
                 <form method="POST" action="{{ route('admin.payments.wallet.bulk') }}">
                     @csrf
 
@@ -169,14 +208,20 @@
                             </svg>
                             AWB Number <span class="required">*</span>
                         </label>
-                        <select name="awb_number" id="awb_number" class="form-select" required>
-                            <option value="">Select AWB Number</option>
-                            @foreach($awbUploads as $awb)
-                                <option value="{{ $awb['awb_no'] }}" {{ old('awb_number') == $awb['awb_no'] ? 'selected' : '' }}>
-                                    {{ $awb['awb_no'] }} - {{ $awb['destination'] ?? '' }}
-                                </option>
-                            @endforeach
-                        </select>
+                        <div class="relative" id="awb_container">
+                            <input type="text" id="awb_search" class="form-input mb-2" placeholder="Search AWB Number..." autocomplete="off">
+                            <select name="awb_number" id="awb_number" class="form-select" required style="display: none;">
+                                <option value="">Select AWB Number</option>
+                                @foreach($awbUploads as $awb)
+                                    <option value="{{ $awb['awb_no'] }}" data-destination="{{ $awb['destination'] ?? '' }}" {{ old('awb_number') == $awb['awb_no'] ? 'selected' : '' }}>
+                                        {{ $awb['awb_no'] }} - {{ $awb['destination'] ?? '' }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            <div id="awb_dropdown" class="absolute z-50 w-full mt-1 bg-white border-2 border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto" style="display: none;">
+                                <!-- Options will be populated here -->
+                            </div>
+                        </div>
                         @error('awb_number')
                             <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                         @enderror
@@ -399,5 +444,99 @@
                 console.log('Available categories for', mode, ':', categories[mode]);
             }
         }
+
+        // AWB Searchable Dropdown
+        (function() {
+            const awbSearch = document.getElementById('awb_search');
+            const awbSelect = document.getElementById('awb_number');
+            const awbDropdown = document.getElementById('awb_dropdown');
+            
+            if (!awbSearch || !awbSelect || !awbDropdown) {
+                return; // Exit if elements don't exist
+            }
+            
+            const awbOptions = Array.from(awbSelect.options).slice(1); // Skip first empty option
+            let selectedAwb = null;
+            
+            // Initialize with selected value if any
+            if (awbSelect.value) {
+                const selectedOption = awbSelect.options[awbSelect.selectedIndex];
+                if (selectedOption) {
+                    awbSearch.value = selectedOption.text;
+                    selectedAwb = awbSelect.value;
+                }
+            }
+            
+            // Build dropdown options
+            function buildDropdown(filterText = '') {
+                const filter = filterText.toLowerCase();
+                const filteredOptions = awbOptions.filter(option => {
+                    const text = option.text.toLowerCase();
+                    const destination = (option.getAttribute('data-destination') || '').toLowerCase();
+                    return text.includes(filter) || destination.includes(filter);
+                });
+                
+                if (filteredOptions.length === 0) {
+                    awbDropdown.innerHTML = '<div class="px-4 py-3 text-sm text-gray-500 text-center">No AWB found</div>';
+                    return;
+                }
+                
+                awbDropdown.innerHTML = filteredOptions.map(option => {
+                    const isSelected = option.value === selectedAwb ? 'bg-orange-50 border-orange-300' : 'hover:bg-gray-50';
+                    const destination = option.getAttribute('data-destination') || '';
+                    const displayText = option.text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                    return `
+                        <div class="px-4 py-2 cursor-pointer border-b border-gray-100 ${isSelected}" 
+                             data-value="${option.value}" 
+                             onclick="selectAwb('${option.value}', '${displayText}')">
+                            <div class="font-semibold text-gray-900">${option.value}</div>
+                            ${destination ? '<div class="text-xs text-gray-500">' + destination + '</div>' : ''}
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            // Show dropdown
+            function showDropdown() {
+                awbDropdown.style.display = 'block';
+                buildDropdown(awbSearch.value);
+            }
+            
+            // Hide dropdown
+            function hideDropdown() {
+                setTimeout(() => {
+                    awbDropdown.style.display = 'none';
+                }, 200);
+            }
+            
+            // Select AWB
+            window.selectAwb = function(value, text) {
+                awbSelect.value = value;
+                awbSearch.value = text;
+                selectedAwb = value;
+                hideDropdown();
+            };
+            
+            // Search input events
+            awbSearch.addEventListener('focus', showDropdown);
+            awbSearch.addEventListener('input', function(e) {
+                buildDropdown(e.target.value);
+                if (e.target.value === '') {
+                    awbSelect.value = '';
+                    selectedAwb = null;
+                }
+            });
+            
+            // Click outside to close
+            const awbContainer = document.getElementById('awb_container');
+            document.addEventListener('click', function(e) {
+                if (awbContainer && !awbContainer.contains(e.target)) {
+                    hideDropdown();
+                }
+            });
+            
+            // Initialize dropdown
+            buildDropdown();
+        })();
     </script>
 @endsection

@@ -52,6 +52,97 @@ class AdminController extends Controller
         
         $totalUsers = User::count();
         
+        // Calculate Bank Account Balances
+        $banks = $this->getBanks();
+        $allPayments = $this->getPaymentsIntoBank();
+        
+        $bankBalances = [];
+        $totalBankBalance = 0;
+        
+        foreach ($banks as $index => $bank) {
+            $bankIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+            $openingBalance = $bank['opening_balance'] ?? 0;
+            
+            // Calculate credits and debits for this bank
+            $credits = 0;
+            $debits = 0;
+            
+            foreach ($allPayments as $payment) {
+                if (($payment['bank_account'] ?? '') === $bankIdentifier) {
+                    if (($payment['type'] ?? '') === 'Credit') {
+                        $credits += floatval($payment['amount'] ?? 0);
+                    } elseif (($payment['type'] ?? '') === 'Debit') {
+                        $debits += floatval($payment['amount'] ?? 0);
+                    }
+                }
+            }
+            
+            $currentBalance = $openingBalance + $credits - $debits;
+            $bankBalances[] = [
+                'name' => $bank['bank_name'] ?? 'Account ' . ($index + 1),
+                'balance' => $currentBalance,
+            ];
+            $totalBankBalance += $currentBalance;
+        }
+        
+        // Calculate Network Wallet Balances
+        $networks = $this->getNetworks();
+        $networkBalances = [];
+        
+        foreach ($networks as $index => $network) {
+            $networkId = $network['id'] ?? null;
+            $openingBalance = $network['opening_balance'] ?? 0;
+            
+            if ($networkId) {
+                // Get transactions from database
+                $transactions = \App\Models\NetworkTransaction::where('network_id', $networkId)->get();
+                $credits = $transactions->where('type', 'credit')->sum('amount');
+                $debits = $transactions->where('type', 'debit')->sum('amount');
+                $currentBalance = $openingBalance + $credits - $debits;
+            } else {
+                $currentBalance = $openingBalance;
+            }
+            
+            $networkBalances[] = [
+                'name' => $network['name'] ?? 'Network ' . ($index + 1),
+                'balance' => $currentBalance,
+            ];
+        }
+        
+        // Calculate Expense Category Wise
+        $expenseCategories = [
+            'Fuel' => 0,
+            'Maintenance' => 0,
+            'Salaries' => 0,
+            'Other' => 0,
+        ];
+        
+        foreach ($allPayments as $payment) {
+            if (($payment['type'] ?? '') === 'Debit') {
+                $category = $payment['category_bank'] ?? 'Other';
+                $amount = floatval($payment['amount'] ?? 0);
+                
+                // Map category_bank to expense categories
+                if ($category === 'Salary') {
+                    $expenseCategories['Salaries'] += $amount;
+                } elseif ($category === 'Expense') {
+                    // Check remark for more specific category
+                    $remark = strtolower($payment['remark'] ?? '');
+                    if (strpos($remark, 'fuel') !== false || strpos($remark, 'petrol') !== false || strpos($remark, 'diesel') !== false) {
+                        $expenseCategories['Fuel'] += $amount;
+                    } elseif (strpos($remark, 'maintenance') !== false || strpos($remark, 'repair') !== false) {
+                        $expenseCategories['Maintenance'] += $amount;
+                    } else {
+                        $expenseCategories['Other'] += $amount;
+                    }
+                } else {
+                    $expenseCategories['Other'] += $amount;
+                }
+            }
+        }
+        
+        $totalExpense = array_sum($expenseCategories);
+        
         // Generate last 7 days dates for graphs
         $dates = [];
         $incomeData = [];
@@ -60,9 +151,24 @@ class AdminController extends Controller
         for ($i = 6; $i >= 0; $i--) {
             $date = now()->subDays($i);
             $dates[] = $date->format('d-m-Y');
-            // For demo, you can replace these with actual data from your database
-            $incomeData[] = rand(0, 5); // Replace with actual income data
-            $expenseData[] = rand(0, 5); // Replace with actual expense data
+            
+            // Calculate actual income and expense for each day
+            $dayIncome = 0;
+            $dayExpense = 0;
+            
+            foreach ($allPayments as $payment) {
+                $paymentDate = isset($payment['created_at']) ? date('Y-m-d', strtotime($payment['created_at'])) : null;
+                if ($paymentDate === $date->format('Y-m-d')) {
+                    if (($payment['type'] ?? '') === 'Credit') {
+                        $dayIncome += floatval($payment['amount'] ?? 0);
+                    } elseif (($payment['type'] ?? '') === 'Debit') {
+                        $dayExpense += floatval($payment['amount'] ?? 0);
+                    }
+                }
+            }
+            
+            $incomeData[] = $dayIncome;
+            $expenseData[] = $dayExpense;
         }
         
         return view('admin.dashboard', [
@@ -70,6 +176,11 @@ class AdminController extends Controller
             'dates' => $dates,
             'incomeData' => $incomeData,
             'expenseData' => $expenseData,
+            'bankBalances' => $bankBalances,
+            'totalBankBalance' => $totalBankBalance,
+            'networkBalances' => $networkBalances,
+            'expenseCategories' => $expenseCategories,
+            'totalExpense' => $totalExpense,
         ]);
     }
 
@@ -421,21 +532,58 @@ class AdminController extends Controller
 
     public function rateCalculator()
     {
-        // Sample data for dropdowns - In production, fetch from database
-        $countries = ['India', 'USA', 'UK', 'Canada', 'Australia', 'Germany', 'France', 'Japan'];
+        $countries = $this->getCountries(true); // Get only active countries
         $shipmentTypes = ['Dox', 'Non-Dox', 'Medicine', 'Special'];
-        
-        // Sample pincodes - In production, fetch from database based on country
-        $pincodes = [
-            'India' => ['110001', '400001', '700001', '600001', '560001', '380001'],
-            'USA' => ['10001', '90001', '60601', '77001', '33101', '94101'],
-            'UK' => ['SW1A 1AA', 'M1 1AA', 'B1 1AA', 'LS1 1AA', 'EC1A 1BB', 'WC1A 1AB'],
-        ];
 
         return view('admin.rate-calculator', [
             'countries' => $countries,
             'shipmentTypes' => $shipmentTypes,
-            'pincodes' => $pincodes,
+        ]);
+    }
+
+    // API endpoint to get pincodes and zones for a country
+    public function getPincodesByCountry(Request $request)
+    {
+        $countryName = $request->input('country');
+        
+        if (empty($countryName)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Country name is required'
+            ], 400);
+        }
+
+        $zones = $this->getZones(true); // Get only active zones
+        
+        // Filter zones by country (already filtered by active status)
+        $countryZones = collect($zones)->filter(function($zone) use ($countryName) {
+            return ($zone['country'] ?? '') == $countryName;
+        });
+
+        // Group by pincode and collect unique zones
+        $pincodeZoneMap = [];
+        foreach ($countryZones as $zone) {
+            $pincode = $zone['pincode'] ?? '';
+            if (!empty($pincode)) {
+                if (!isset($pincodeZoneMap[$pincode])) {
+                    $pincodeZoneMap[$pincode] = [
+                        'pincode' => $pincode,
+                        'zones' => []
+                    ];
+                }
+                $zoneName = $zone['zone'] ?? '';
+                if (!empty($zoneName) && !in_array($zoneName, $pincodeZoneMap[$pincode]['zones'])) {
+                    $pincodeZoneMap[$pincode]['zones'][] = $zoneName;
+                }
+            }
+        }
+
+        // Format response: array of {pincode, zones[]}
+        $result = array_values($pincodeZoneMap);
+
+        return response()->json([
+            'success' => true,
+            'data' => $result
         ]);
     }
 
@@ -450,24 +598,23 @@ class AdminController extends Controller
             'weight' => 'required|numeric|min:0.1',
         ]);
 
-        // Get zones based on pincodes
-        $zones = $this->getZones();
+        // Get zones based on pincodes (only active zones)
+        $zones = $this->getZones(true);
         $destinationZone = null;
         
         // Find destination zone from destination pincode (for base price matching)
         $destinationZoneData = collect($zones)->first(function($zone) use ($request) {
             return ($zone['pincode'] ?? '') == $request->destination_pincode 
-                && ($zone['country'] ?? '') == $request->destination_country
-                && ($zone['status'] ?? '') == 'Active';
+                && ($zone['country'] ?? '') == $request->destination_country;
         });
         if ($destinationZoneData) {
             $destinationZone = $destinationZoneData['zone'] ?? null;
         }
         
-        // Get all formulas, shipping charges, and services
-        $allFormulas = $this->getFormulas();
+        // Get all formulas, shipping charges, and services (only active ones)
+        $allFormulas = $this->getFormulas(true);
         $allShippingCharges = $this->getShippingCharges();
-        $allServices = $this->getServices();
+        $allServices = $this->getServices(true);
         $weight = (float)$request->weight;
         
         // ============================================
@@ -563,10 +710,8 @@ class AdminController extends Controller
         $appliedFormulas = [];
         $formulaChargeTotal = 0;
         
-        // Find all active formulas
-        $allActiveFormulas = collect($allFormulas)->filter(function($formula) {
-            return ($formula['status'] ?? '') == 'Active';
-        });
+        // All formulas are already filtered to active only
+        $allActiveFormulas = collect($allFormulas);
         
         // Find formulas that match the exact network and service from base charge
         $applicableFormulas = collect([]);
@@ -781,14 +926,15 @@ class AdminController extends Controller
     }
 
     // Get networks from database with session fallback
-    private function getNetworks()
+    private function getNetworks($activeOnly = false)
     {
         // Try to get from database first
         $dbNetworks = Network::all();
         
+        $networks = [];
         if ($dbNetworks->isNotEmpty()) {
             // Convert to array format for backward compatibility
-            return $dbNetworks->map(function($network) {
+            $networks = $dbNetworks->map(function($network) {
                 return [
                     'id' => $network->id,
                     'name' => $network->name,
@@ -800,41 +946,49 @@ class AdminController extends Controller
                     'remark' => $network->remark,
                 ];
             })->toArray();
+        } else {
+            // Fallback to session
+            if (session()->has('networks')) {
+                $networks = session('networks');
+            } else {
+                // Initialize with default networks if both are empty
+                $defaultNetworks = [
+                    [
+                        'id' => 1,
+                        'name' => 'DTDC',
+                        'type' => 'Domestic',
+                        'opening_balance' => 5000.00,
+                        'status' => 'Active',
+                        'bank_details' => 'HDFC Bank - Account: ****1234',
+                        'upi_scanner' => 'dtdc@paytm',
+                        'remark' => 'Primary domestic network',
+                    ],
+                    [
+                        'id' => 2,
+                        'name' => 'FedEx',
+                        'type' => 'International',
+                        'opening_balance' => 10000.00,
+                        'status' => 'Active',
+                        'bank_details' => 'ICICI Bank - Account: ****5678',
+                        'upi_scanner' => 'fedex@upi',
+                        'remark' => 'International shipping partner',
+                    ],
+                ];
+                
+                // Store defaults in session
+                session(['networks' => $defaultNetworks]);
+                $networks = $defaultNetworks;
+            }
         }
         
-        // Fallback to session
-        if (session()->has('networks')) {
-            return session('networks');
+        // Filter to return only Active networks if requested
+        if ($activeOnly) {
+            return array_filter($networks, function($network) {
+                return ($network['status'] ?? '') == 'Active';
+            });
         }
         
-        // Initialize with default networks if both are empty
-        $defaultNetworks = [
-            [
-                'id' => 1,
-                'name' => 'DTDC',
-                'type' => 'Domestic',
-                'opening_balance' => 5000.00,
-                'status' => 'Active',
-                'bank_details' => 'HDFC Bank - Account: ****1234',
-                'upi_scanner' => 'dtdc@paytm',
-                'remark' => 'Primary domestic network',
-            ],
-            [
-                'id' => 2,
-                'name' => 'FedEx',
-                'type' => 'International',
-                'opening_balance' => 10000.00,
-                'status' => 'Active',
-                'bank_details' => 'ICICI Bank - Account: ****5678',
-                'upi_scanner' => 'fedex@upi',
-                'remark' => 'International shipping partner',
-            ],
-        ];
-        
-        // Store defaults in session
-        session(['networks' => $defaultNetworks]);
-        
-        return $defaultNetworks;
+        return $networks;
     }
 
     public function networks()
@@ -940,6 +1094,125 @@ class AdminController extends Controller
         } catch (\Exception $e) {
             return redirect()->back()
                 ->with('error', 'Error deleting networks: ' . $e->getMessage());
+        }
+    }
+
+    public function viewNetwork($id)
+    {
+        try {
+            // Try to get from database first
+            $networkModel = Network::find($id);
+            $network = null;
+            
+            if ($networkModel) {
+                $network = $networkModel;
+            } else {
+                // Fallback to session
+                $networks = $this->getNetworks();
+                $networkArray = collect($networks)->firstWhere('id', $id);
+                
+                if (!$networkArray) {
+                    return redirect()->route('admin.networks.all')->with('error', 'Network not found');
+                }
+                
+                // Convert session network to object-like structure for consistency
+                $network = (object) $networkArray;
+            }
+            
+            // Get network transactions (credit/debit) - use database ID
+            $transactions = \App\Models\NetworkTransaction::where('network_id', $id)->orderBy('created_at', 'desc')->get();
+            
+            $creditTransactions = $transactions->where('type', 'credit')->values();
+            $debitTransactions = $transactions->where('type', 'debit')->values();
+            
+            $totalCredits = $transactions->where('type', 'credit')->sum('amount');
+            $totalDebits = $transactions->where('type', 'debit')->sum('amount');
+            
+            // Calculate current balance
+            $openingBalance = is_object($network) && isset($network->opening_balance) 
+                ? $network->opening_balance 
+                : (isset($network['opening_balance']) ? $network['opening_balance'] : 0);
+            $currentBalance = $openingBalance + $totalCredits - $totalDebits;
+            
+            // Get AWB uploads for this network
+            $networkName = is_object($network) && isset($network->name) 
+                ? $network->name 
+                : (isset($network['name']) ? $network['name'] : '');
+            
+            $awbUploads = \App\Models\AwbUpload::where('network_name', $networkName)->orderBy('created_at', 'desc')->get();
+            
+            // Calculate AWB statistics
+            $totalAwbs = $awbUploads->count();
+            $totalAwbAmount = $awbUploads->sum('amour');
+            $totalAwbWeight = $awbUploads->sum('chargeable_weight');
+            
+            // Get unique AWB numbers with transactions
+            $awbNumbers = $transactions->whereNotNull('awb_no')->pluck('awb_no')->unique()->values();
+            
+            // Prepare transaction data
+            $creditTransactionsData = $creditTransactions->map(function($transaction) {
+                return [
+                    'id' => $transaction->id,
+                    'awb_no' => $transaction->awb_no,
+                    'booking_id' => $transaction->booking_id,
+                    'amount' => $transaction->amount,
+                    'balance_before' => $transaction->balance_before,
+                    'balance_after' => $transaction->balance_after,
+                    'transaction_type' => $transaction->transaction_type,
+                    'description' => $transaction->description,
+                    'notes' => $transaction->notes,
+                    'created_at' => $transaction->created_at,
+                ];
+            })->toArray();
+            
+            $debitTransactionsData = $debitTransactions->map(function($transaction) {
+                return [
+                    'id' => $transaction->id,
+                    'awb_no' => $transaction->awb_no,
+                    'booking_id' => $transaction->booking_id,
+                    'amount' => $transaction->amount,
+                    'balance_before' => $transaction->balance_before,
+                    'balance_after' => $transaction->balance_after,
+                    'transaction_type' => $transaction->transaction_type,
+                    'description' => $transaction->description,
+                    'notes' => $transaction->notes,
+                    'created_at' => $transaction->created_at,
+                ];
+            })->toArray();
+            
+            // Prepare AWB uploads data
+            $awbUploadsData = $awbUploads->map(function($awb) {
+                return [
+                    'id' => $awb->id,
+                    'awb_no' => $awb->awb_no,
+                    'origin' => $awb->origin,
+                    'destination' => $awb->destination,
+                    'service_name' => $awb->service_name,
+                    'chargeable_weight' => $awb->chargeable_weight,
+                    'amour' => $awb->amour,
+                    'date_of_sale' => $awb->date_of_sale,
+                    'created_at' => $awb->created_at,
+                ];
+            })->toArray();
+            
+            return view('admin.networks.view', [
+                'network' => $network,
+                'creditTransactions' => $creditTransactionsData,
+                'debitTransactions' => $debitTransactionsData,
+                'totalCredits' => $totalCredits,
+                'totalDebits' => $totalDebits,
+                'openingBalance' => $openingBalance,
+                'currentBalance' => $currentBalance,
+                'totalTransactions' => $transactions->count(),
+                'awbUploads' => $awbUploadsData,
+                'totalAwbs' => $totalAwbs,
+                'totalAwbAmount' => $totalAwbAmount,
+                'totalAwbWeight' => $totalAwbWeight,
+                'uniqueAwbCount' => $awbNumbers->count(),
+            ]);
+            
+        } catch (\Exception $e) {
+            return redirect()->route('admin.networks.all')->with('error', 'Error loading network: ' . $e->getMessage());
         }
     }
 
@@ -1387,15 +1660,48 @@ class AdminController extends Controller
     }
 
     // Services Management
-    private function getServices()
+    private function getServices($activeOnly = false)
     {
-        if (session()->has('services') && !empty(session('services'))) {
-            return session('services');
+        // Try to get from database first
+        $dbServices = \App\Models\Service::orderBy('name', 'asc')->get();
+        
+        if ($dbServices->isNotEmpty()) {
+            // Convert to array format for backward compatibility
+            $services = $dbServices->map(function($service) {
+                return [
+                    'id' => $service->id,
+                    'name' => $service->name,
+                    'network' => $service->network,
+                    'transit_time' => $service->transit_time,
+                    'items_allowed' => $service->items_allowed,
+                    'status' => $service->status,
+                    'remark' => $service->remark,
+                    'display_title' => $service->display_title,
+                    'description' => $service->description,
+                    'icon_type' => $service->icon_type,
+                    'is_highlighted' => $service->is_highlighted,
+                    'created_at' => $service->created_at ? $service->created_at->toDateTimeString() : now()->toDateTimeString(),
+                ];
+            })->toArray();
+        } else {
+            // Fallback to session if database is empty
+            if (session()->has('services') && !empty(session('services'))) {
+                $services = session('services');
+            } else {
+                // Initialize default services if none exist
+                $this->initializeDefaultServices();
+                $services = session('services');
+            }
         }
         
-        // Initialize default services if none exist
-        $this->initializeDefaultServices();
-        return session('services');
+        // Filter to return only Active services if requested
+        if ($activeOnly) {
+            return array_filter($services, function($service) {
+                return ($service['status'] ?? '') == 'Active';
+            });
+        }
+        
+        return $services;
     }
     
     private function initializeDefaultServices()
@@ -1467,7 +1773,7 @@ class AdminController extends Controller
     public function createService()
     {
         $services = $this->getServices();
-        $networks = $this->getNetworks();
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
         return view('admin.services.create', [
             'services' => $services,
             'networks' => $networks,
@@ -1477,7 +1783,13 @@ class AdminController extends Controller
     public function allServices(Request $request)
     {
         $services = $this->getServices();
-        $networks = $this->getNetworks();
+        $networks = $this->getNetworks(true); // Get only active networks for filtering
+        
+        // Filter services to only show those whose network exists and is active
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $services = array_filter($services, function($service) use ($networkNames) {
+            return in_array($service['network'] ?? '', $networkNames);
+        });
         
         // Apply search filter
         if ($request->filled('search')) {
@@ -1521,7 +1833,7 @@ class AdminController extends Controller
     {
         $services = $this->getServices();
         $service = collect($services)->firstWhere('id', $id);
-        $networks = $this->getNetworks();
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
         
         if (!$service) {
             return redirect()->route('admin.services.all')->with('error', 'Service not found');
@@ -1549,6 +1861,41 @@ class AdminController extends Controller
             'is_highlighted' => 'nullable',
         ]);
 
+        // Check if network exists (only check active networks)
+        $networks = $this->getNetworks(true);
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        
+        if (!in_array($request->network, $networkNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Network does not exist or is inactive. Please create an active network first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Network does not exist or is inactive. Please create an active network first.');
+        }
+
+        $services = $this->getServices();
+        if (!is_array($services)) {
+            $services = [];
+        }
+
+        // Check if service with same name and network already exists
+        $exists = collect($services)->first(function($service) use ($request) {
+            return strcasecmp($service['name'] ?? '', $request->service_name) === 0 &&
+                   strcasecmp($service['network'] ?? '', $request->network) === 0;
+        });
+
+        if ($exists) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Service with this name and network already exists.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Service with this name and network already exists.');
+        }
+
         // Convert checkbox to status string
         $statusValue = $request->input('status');
         $status = ($statusValue === '1' || $statusValue === 'on' || $statusValue === true || $statusValue === 1) ? 'Active' : 'Inactive';
@@ -1556,32 +1903,49 @@ class AdminController extends Controller
         // Handle is_highlighted checkbox
         $isHighlightedValue = $request->input('is_highlighted');
         $isHighlighted = ($isHighlightedValue === '1' || $isHighlightedValue === 'on' || $isHighlightedValue === true || $isHighlightedValue === 1);
-
-        $services = $this->getServices();
-        if (!is_array($services)) {
-            $services = [];
+        
+        // Save to database
+        try {
+            \App\Models\Service::create([
+                'name' => $request->service_name,
+                'network' => $request->network,
+                'transit_time' => $request->transit_time,
+                'items_allowed' => $request->items_allowed,
+                'status' => $status,
+                'remark' => $request->remark ?? '',
+                'display_title' => $request->display_title ?? $request->service_name,
+                'description' => $request->description ?? '',
+                'icon_type' => $request->icon_type ?? 'truck',
+                'is_highlighted' => $isHighlighted,
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $services = $this->getServices();
+            if (!is_array($services)) {
+                $services = [];
+            }
+            
+            $newId = count($services) > 0 ? max(array_column($services, 'id')) + 1 : 1;
+            
+            $newService = [
+                'id' => $newId,
+                'name' => $request->service_name,
+                'network' => $request->network,
+                'transit_time' => $request->transit_time,
+                'items_allowed' => $request->items_allowed,
+                'status' => $status,
+                'remark' => $request->remark ?? '',
+                'display_title' => $request->display_title ?? $request->service_name,
+                'description' => $request->description ?? '',
+                'icon_type' => $request->icon_type ?? 'truck',
+                'is_highlighted' => $isHighlighted,
+                'created_at' => now()->toDateTimeString(),
+            ];
+            
+            $services[] = $newService;
+            session(['services' => $services]);
+            session()->save();
         }
-        
-        $newId = count($services) > 0 ? max(array_column($services, 'id')) + 1 : 1;
-        
-        $newService = [
-            'id' => $newId,
-            'name' => $request->service_name,
-            'network' => $request->network,
-            'transit_time' => $request->transit_time,
-            'items_allowed' => $request->items_allowed,
-            'status' => $status,
-            'remark' => $request->remark ?? '',
-            'display_title' => $request->display_title ?? $request->service_name,
-            'description' => $request->description ?? '',
-            'icon_type' => $request->icon_type ?? 'truck',
-            'is_highlighted' => $isHighlighted,
-            'created_at' => now()->toDateTimeString(),
-        ];
-        
-        $services[] = $newService;
-        session(['services' => $services]);
-        session()->save();
 
         // Return JSON response for AJAX requests
         if ($request->ajax() || $request->wantsJson()) {
@@ -1610,13 +1974,19 @@ class AdminController extends Controller
             'is_highlighted' => 'nullable',
         ]);
 
-        // Convert checkbox to status string
-        $statusValue = $request->input('status');
-        $status = ($statusValue === '1' || $statusValue === 'on' || $statusValue === true || $statusValue === 1) ? 'Active' : 'Inactive';
+        // Check if network exists (only check active networks)
+        $networks = $this->getNetworks(true);
+        $networkNames = collect($networks)->pluck('name')->toArray();
         
-        // Handle is_highlighted checkbox
-        $isHighlightedValue = $request->input('is_highlighted');
-        $isHighlighted = ($isHighlightedValue === '1' || $isHighlightedValue === 'on' || $isHighlightedValue === true || $isHighlightedValue === 1);
+        if (!in_array($request->network, $networkNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Network does not exist or is inactive. Please create an active network first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Network does not exist or is inactive. Please create an active network first.');
+        }
 
         $services = $this->getServices();
         if (!is_array($services)) {
@@ -1625,92 +1995,156 @@ class AdminController extends Controller
         
         // Store old service name for cascading updates
         $oldService = collect($services)->firstWhere('id', $id);
+        if (!$oldService) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Service not found.',
+                ], 404);
+            }
+            return redirect()->back()->withInput()->with('error', 'Service not found.');
+        }
+        
         $oldServiceName = $oldService['name'] ?? null;
+        $oldNetwork = $oldService['network'] ?? null;
         $newServiceName = $request->service_name;
-        
-        $services = array_map(function($service) use ($id, $request, $status, $isHighlighted, $newServiceName) {
-            if ($service['id'] == $id) {
-                return [
-                    'id' => $id,
-                    'name' => $newServiceName,
-                    'network' => $request->network,
-                    'transit_time' => $request->transit_time,
-                    'items_allowed' => $request->items_allowed,
-                    'status' => $status,
-                    'remark' => $request->remark ?? '',
-                    'display_title' => $request->display_title ?? $newServiceName,
-                    'description' => $request->description ?? ($service['description'] ?? ''),
-                    'icon_type' => $request->icon_type ?? ($service['icon_type'] ?? 'truck'),
-                    'is_highlighted' => $isHighlighted,
-                ];
+        $newNetwork = $request->network;
+
+        // Check if another service with same name and network already exists (excluding current service)
+        $exists = collect($services)->first(function($service) use ($id, $newServiceName, $newNetwork) {
+            return $service['id'] != $id &&
+                   strcasecmp($service['name'] ?? '', $newServiceName) === 0 &&
+                   strcasecmp($service['network'] ?? '', $newNetwork) === 0;
+        });
+
+        if ($exists) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Another service with this name and network already exists.',
+                ], 422);
             }
-            return $service;
-        }, $services);
+            return redirect()->back()->withInput()->with('error', 'Another service with this name and network already exists.');
+        }
+
+        // Convert checkbox to status string
+        $statusValue = $request->input('status');
+        $status = ($statusValue === '1' || $statusValue === 'on' || $statusValue === true || $statusValue === 1) ? 'Active' : 'Inactive';
         
-        // Cascade update: Update all related records if service name changed
-        if ($oldServiceName && $oldServiceName !== $newServiceName) {
-            // Update AwbUploads in database
-            \DB::table('awb_uploads')
-                ->where('service_name', $oldServiceName)
-                ->update(['service_name' => $newServiceName]);
+        // Handle is_highlighted checkbox
+        $isHighlightedValue = $request->input('is_highlighted');
+        $isHighlighted = ($isHighlightedValue === '1' || $isHighlightedValue === 'on' || $isHighlightedValue === true || $isHighlightedValue === 1);
+        
+        // Try to update in database first
+        try {
+            $service = \App\Models\Service::findOrFail($id);
             
-            // Update Bookings in session
-            $bookings = $this->getBookings();
-            if (is_array($bookings)) {
-                $bookings = array_map(function($booking) use ($oldServiceName, $newServiceName) {
-                    if (isset($booking['service']) && $booking['service'] === $oldServiceName) {
-                        $booking['service'] = $newServiceName;
-                    }
-                    return $booking;
-                }, $bookings);
-                session(['bookings' => array_values($bookings)]);
+            // Cascade update: Update all related records if service name changed
+            if ($oldServiceName && $oldServiceName !== $newServiceName) {
+                // Update AwbUploads in database
+                \DB::table('awb_uploads')
+                    ->where('service_name', $oldServiceName)
+                    ->update(['service_name' => $newServiceName]);
+                
+                // Update Zones in database
+                \DB::table('zones')
+                    ->where('service', $oldServiceName)
+                    ->update(['service' => $newServiceName]);
             }
             
-            // Update Direct Entry Bookings in session
-            if (session()->has('direct_entry_bookings')) {
-                $directEntryBookings = session('direct_entry_bookings');
-                if (is_array($directEntryBookings)) {
-                    $directEntryBookings = array_map(function($booking) use ($oldServiceName, $newServiceName) {
+            $service->update([
+                'name' => $newServiceName,
+                'network' => $request->network,
+                'transit_time' => $request->transit_time,
+                'items_allowed' => $request->items_allowed,
+                'status' => $status,
+                'remark' => $request->remark ?? '',
+                'display_title' => $request->display_title ?? $newServiceName,
+                'description' => $request->description ?? $service->description,
+                'icon_type' => $request->icon_type ?? $service->icon_type ?? 'truck',
+                'is_highlighted' => $isHighlighted,
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $services = array_map(function($service) use ($id, $request, $status, $isHighlighted, $newServiceName) {
+                if ($service['id'] == $id) {
+                    return [
+                        'id' => $id,
+                        'name' => $newServiceName,
+                        'network' => $request->network,
+                        'transit_time' => $request->transit_time,
+                        'items_allowed' => $request->items_allowed,
+                        'status' => $status,
+                        'remark' => $request->remark ?? '',
+                        'display_title' => $request->display_title ?? $newServiceName,
+                        'description' => $request->description ?? ($service['description'] ?? ''),
+                        'icon_type' => $request->icon_type ?? ($service['icon_type'] ?? 'truck'),
+                        'is_highlighted' => $isHighlighted,
+                    ];
+                }
+                return $service;
+            }, $services);
+            
+            // Cascade update: Update all related records if service name changed
+            if ($oldServiceName && $oldServiceName !== $newServiceName) {
+                // Update Bookings in session
+                $bookings = $this->getBookings();
+                if (is_array($bookings)) {
+                    $bookings = array_map(function($booking) use ($oldServiceName, $newServiceName) {
                         if (isset($booking['service']) && $booking['service'] === $oldServiceName) {
                             $booking['service'] = $newServiceName;
                         }
                         return $booking;
-                    }, $directEntryBookings);
-                    session(['direct_entry_bookings' => array_values($directEntryBookings)]);
+                    }, $bookings);
+                    session(['bookings' => array_values($bookings)]);
+                }
+                
+                // Update Direct Entry Bookings in session
+                if (session()->has('direct_entry_bookings')) {
+                    $directEntryBookings = session('direct_entry_bookings');
+                    if (is_array($directEntryBookings)) {
+                        $directEntryBookings = array_map(function($booking) use ($oldServiceName, $newServiceName) {
+                            if (isset($booking['service']) && $booking['service'] === $oldServiceName) {
+                                $booking['service'] = $newServiceName;
+                            }
+                            return $booking;
+                        }, $directEntryBookings);
+                        session(['direct_entry_bookings' => array_values($directEntryBookings)]);
+                    }
+                }
+                
+                // Update Shipping Charges in session
+                if (session()->has('shipping_charges')) {
+                    $shippingCharges = session('shipping_charges');
+                    if (is_array($shippingCharges)) {
+                        $shippingCharges = array_map(function($charge) use ($oldServiceName, $newServiceName) {
+                            if (isset($charge['service']) && $charge['service'] === $oldServiceName) {
+                                $charge['service'] = $newServiceName;
+                            }
+                            return $charge;
+                        }, $shippingCharges);
+                        session(['shipping_charges' => array_values($shippingCharges)]);
+                    }
+                }
+                
+                // Update Formulas in session
+                if (session()->has('formulas')) {
+                    $formulas = session('formulas');
+                    if (is_array($formulas)) {
+                        $formulas = array_map(function($formula) use ($oldServiceName, $newServiceName) {
+                            if (isset($formula['service']) && $formula['service'] === $oldServiceName) {
+                                $formula['service'] = $newServiceName;
+                            }
+                            return $formula;
+                        }, $formulas);
+                        session(['formulas' => array_values($formulas)]);
+                    }
                 }
             }
             
-            // Update Shipping Charges in session
-            if (session()->has('shipping_charges')) {
-                $shippingCharges = session('shipping_charges');
-                if (is_array($shippingCharges)) {
-                    $shippingCharges = array_map(function($charge) use ($oldServiceName, $newServiceName) {
-                        if (isset($charge['service']) && $charge['service'] === $oldServiceName) {
-                            $charge['service'] = $newServiceName;
-                        }
-                        return $charge;
-                    }, $shippingCharges);
-                    session(['shipping_charges' => array_values($shippingCharges)]);
-                }
-            }
-            
-            // Update Formulas in session
-            if (session()->has('formulas')) {
-                $formulas = session('formulas');
-                if (is_array($formulas)) {
-                    $formulas = array_map(function($formula) use ($oldServiceName, $newServiceName) {
-                        if (isset($formula['service']) && $formula['service'] === $oldServiceName) {
-                            $formula['service'] = $newServiceName;
-                        }
-                        return $formula;
-                    }, $formulas);
-                    session(['formulas' => array_values($formulas)]);
-                }
-            }
+            session(['services' => array_values($services)]);
+            session()->save();
         }
-        
-        session(['services' => array_values($services)]);
-        session()->save();
 
         // Return JSON response for AJAX requests
         if ($request->ajax() || $request->wantsJson()) {
@@ -1727,75 +2161,90 @@ class AdminController extends Controller
     public function toggleServiceStatus($id)
     {
         try {
-            // Get services from session
-            $services = $this->getServices();
-            if (!is_array($services)) {
-                $services = [];
-            }
-            
-            // Find the service by ID
-            $serviceFound = false;
-            $services = array_map(function($service) use ($id, &$serviceFound) {
-                if ($service['id'] == $id) {
-                    $serviceFound = true;
-                    // Toggle status between Active and Inactive
-                    $service['status'] = ($service['status'] === 'Active') ? 'Inactive' : 'Active';
-                }
-                return $service;
-            }, $services);
-            
-            if (!$serviceFound) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Service not found'
-                ], 404);
-            }
-            
-            // Save back to session
-            session(['services' => array_values($services)]);
-            session()->save();
-            
-            // Get the updated service status
-            $updatedService = collect($services)->firstWhere('id', $id);
+            // Try to update in database first
+            $service = \App\Models\Service::findOrFail($id);
+            $service->status = $service->status === 'Active' ? 'Inactive' : 'Active';
+            $service->save();
             
             return response()->json([
                 'success' => true,
-                'status' => $updatedService['status'],
+                'status' => $service->status,
                 'message' => 'Service status updated successfully!'
             ]);
             
         } catch (\Exception $e) {
-            \Log::error('Service status toggle failed: ' . $e->getMessage());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Error updating service status: ' . $e->getMessage()
-            ], 422);
+            // Fallback to session if database fails
+            try {
+                $services = $this->getServices();
+                if (!is_array($services)) {
+                    $services = [];
+                }
+                
+                // Find the service by ID
+                $serviceFound = false;
+                $services = array_map(function($service) use ($id, &$serviceFound) {
+                    if ($service['id'] == $id) {
+                        $serviceFound = true;
+                        // Toggle status between Active and Inactive
+                        $service['status'] = ($service['status'] === 'Active') ? 'Inactive' : 'Active';
+                    }
+                    return $service;
+                }, $services);
+                
+                if (!$serviceFound) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Service not found'
+                    ], 404);
+                }
+                
+                // Save back to session
+                session(['services' => array_values($services)]);
+                session()->save();
+                
+                // Get the updated service status
+                $updatedService = collect($services)->firstWhere('id', $id);
+                
+                return response()->json([
+                    'success' => true,
+                    'status' => $updatedService['status'],
+                    'message' => 'Service status updated successfully!'
+                ]);
+            } catch (\Exception $sessionError) {
+                \Log::error('Service status toggle failed: ' . $sessionError->getMessage());
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error updating service status: ' . $sessionError->getMessage()
+                ], 422);
+            }
         }
     }
 
     public function deleteService($id)
     {
         try {
-        $services = $this->getServices();
-        if (!is_array($services)) {
-            $services = [];
-        }
+            // Try to delete from database first
+            \App\Models\Service::findOrFail($id)->delete();
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $services = $this->getServices();
+            if (!is_array($services)) {
+                $services = [];
+            }
             
             // Convert ID to integer for proper comparison
             $id = (int)$id;
-        
-        $services = array_filter($services, function($service) use ($id) {
+            
+            $services = array_filter($services, function($service) use ($id) {
                 return (int)($service['id'] ?? 0) != $id;
-        });
-        
-        session(['services' => array_values($services)]);
-        session()->save();
+            });
+            
+            session(['services' => array_values($services)]);
+            session()->save();
+        }
         
         return redirect()->route('admin.services.all')->with('success', 'Service deleted successfully!');
-        } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Error deleting service: ' . $e->getMessage());
-        }
     }
 
     /**
@@ -1834,35 +2283,63 @@ class AdminController extends Controller
     }
 
     // Countries Management
-    private function getCountries()
+    private function getCountries($activeOnly = false)
     {
-        if (session()->has('countries')) {
-            return session('countries');
+        // Try to get from database first
+        $dbCountries = \App\Models\Country::orderBy('name', 'asc')->get();
+        
+        if ($dbCountries->isNotEmpty()) {
+            // Convert to array format for backward compatibility
+            $countries = $dbCountries->map(function($country) {
+                return [
+                    'id' => $country->id,
+                    'name' => $country->name,
+                    'code' => $country->code,
+                    'isd_no' => $country->isd_no,
+                    'dialing_code' => $country->dialing_code,
+                    'status' => $country->status,
+                    'remark' => $country->remark,
+                    'created_at' => $country->created_at ? $country->created_at->toDateTimeString() : now()->toDateTimeString(),
+                ];
+            })->toArray();
+        } else {
+            // Fallback to session if database is empty
+            if (session()->has('countries')) {
+                $countries = session('countries');
+            } else {
+                $defaultCountries = [
+                    [
+                        'id' => 1,
+                        'name' => 'India',
+                        'code' => 'IN',
+                        'isd_no' => '+91',
+                        'dialing_code' => '0091',
+                        'status' => 'Active',
+                        'remark' => 'Primary country',
+                    ],
+                    [
+                        'id' => 2,
+                        'name' => 'United States',
+                        'code' => 'US',
+                        'isd_no' => '+1',
+                        'dialing_code' => '001',
+                        'status' => 'Active',
+                        'remark' => 'International shipping',
+                    ],
+                ];
+                session(['countries' => $defaultCountries]);
+                $countries = $defaultCountries;
+            }
         }
         
-        $defaultCountries = [
-            [
-                'id' => 1,
-                'name' => 'India',
-                'code' => 'IN',
-                'isd_no' => '+91',
-                'dialing_code' => '0091',
-                'status' => 'Active',
-                'remark' => 'Primary country',
-            ],
-            [
-                'id' => 2,
-                'name' => 'United States',
-                'code' => 'US',
-                'isd_no' => '+1',
-                'dialing_code' => '001',
-                'status' => 'Active',
-                'remark' => 'International shipping',
-            ],
-        ];
+        // Filter to return only Active countries if requested
+        if ($activeOnly) {
+            return array_filter($countries, function($country) {
+                return ($country['status'] ?? '') == 'Active';
+            });
+        }
         
-        session(['countries' => $defaultCountries]);
-        return $defaultCountries;
+        return $countries;
     }
 
     public function countries()
@@ -1940,27 +2417,40 @@ class AdminController extends Controller
         $statusValue = $request->input('status');
         $status = ($statusValue === '1' || $statusValue === 'on' || $statusValue === true || $statusValue === 1) ? 'Active' : 'Inactive';
 
-        $countries = $this->getCountries();
-        if (!is_array($countries)) {
-            $countries = [];
+        // Save to database
+        try {
+            \App\Models\Country::create([
+                'name' => $request->country_name,
+                'code' => $request->country_code,
+                'isd_no' => $request->country_isd_no,
+                'dialing_code' => $request->country_dialing_code ?? '',
+                'status' => $status,
+                'remark' => $request->remark ?? '',
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $countries = $this->getCountries();
+            if (!is_array($countries)) {
+                $countries = [];
+            }
+            
+            $newId = count($countries) > 0 ? max(array_column($countries, 'id')) + 1 : 1;
+            
+            $newCountry = [
+                'id' => $newId,
+                'name' => $request->country_name,
+                'code' => $request->country_code,
+                'isd_no' => $request->country_isd_no,
+                'dialing_code' => $request->country_dialing_code ?? '',
+                'status' => $status,
+                'remark' => $request->remark ?? '',
+                'created_at' => now()->toDateTimeString(),
+            ];
+            
+            $countries[] = $newCountry;
+            session(['countries' => $countries]);
+            session()->save();
         }
-        
-        $newId = count($countries) > 0 ? max(array_column($countries, 'id')) + 1 : 1;
-        
-        $newCountry = [
-            'id' => $newId,
-            'name' => $request->country_name,
-            'code' => $request->country_code,
-            'isd_no' => $request->country_isd_no,
-            'dialing_code' => $request->country_dialing_code ?? '',
-            'status' => $status,
-            'remark' => $request->remark ?? '',
-            'created_at' => now()->toDateTimeString(),
-        ];
-        
-        $countries[] = $newCountry;
-        session(['countries' => $countries]);
-        session()->save();
 
         // Return JSON response for AJAX requests
         if ($request->ajax() || $request->wantsJson()) {
@@ -1989,29 +2479,43 @@ class AdminController extends Controller
         $statusValue = $request->input('status');
         $status = ($statusValue === '1' || $statusValue === 'on' || $statusValue === true || $statusValue === 1) ? 'Active' : 'Inactive';
 
-        $countries = $this->getCountries();
-        if (!is_array($countries)) {
-            $countries = [];
-        }
-        
-        $countries = array_map(function($country) use ($id, $request, $status) {
-            if ($country['id'] == $id) {
-                return [
-                    'id' => $id,
-                    'name' => $request->country_name,
-                    'code' => $request->country_code,
-                    'isd_no' => $request->country_isd_no,
-                    'dialing_code' => $request->country_dialing_code ?? '',
-                    'status' => $status,
-                    'remark' => $request->remark ?? '',
-                    'created_at' => $country['created_at'] ?? now()->toDateTimeString(),
-                ];
+        // Try to update in database first
+        try {
+            $country = \App\Models\Country::findOrFail($id);
+            $country->update([
+                'name' => $request->country_name,
+                'code' => $request->country_code,
+                'isd_no' => $request->country_isd_no,
+                'dialing_code' => $request->country_dialing_code ?? '',
+                'status' => $status,
+                'remark' => $request->remark ?? '',
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $countries = $this->getCountries();
+            if (!is_array($countries)) {
+                $countries = [];
             }
-            return $country;
-        }, $countries);
-        
-        session(['countries' => array_values($countries)]);
-        session()->save();
+            
+            $countries = array_map(function($country) use ($id, $request, $status) {
+                if ($country['id'] == $id) {
+                    return [
+                        'id' => $id,
+                        'name' => $request->country_name,
+                        'code' => $request->country_code,
+                        'isd_no' => $request->country_isd_no,
+                        'dialing_code' => $request->country_dialing_code ?? '',
+                        'status' => $status,
+                        'remark' => $request->remark ?? '',
+                        'created_at' => $country['created_at'] ?? now()->toDateTimeString(),
+                    ];
+                }
+                return $country;
+            }, $countries);
+            
+            session(['countries' => array_values($countries)]);
+            session()->save();
+        }
 
         // Return JSON response for AJAX requests
         if ($request->ajax() || $request->wantsJson()) {
@@ -2028,66 +2532,85 @@ class AdminController extends Controller
     public function toggleCountryStatus($id)
     {
         try {
-            // Get countries from session
-            $countries = $this->getCountries();
-            if (!is_array($countries)) {
-                $countries = [];
-            }
-            
-            // Find the country by ID
-            $countryFound = false;
-            $countries = array_map(function($country) use ($id, &$countryFound) {
-                if ($country['id'] == $id) {
-                    $countryFound = true;
-                    // Toggle status between Active and Inactive
-                    $country['status'] = ($country['status'] === 'Active') ? 'Inactive' : 'Active';
-                }
-                return $country;
-            }, $countries);
-            
-            if (!$countryFound) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Country not found'
-                ], 404);
-            }
-            
-            // Save back to session
-            session(['countries' => array_values($countries)]);
-            session()->save();
-            
-            // Get the updated country status
-            $updatedCountry = collect($countries)->firstWhere('id', $id);
+            // Try to update in database first
+            $country = \App\Models\Country::findOrFail($id);
+            $country->status = $country->status === 'Active' ? 'Inactive' : 'Active';
+            $country->save();
             
             return response()->json([
                 'success' => true,
-                'status' => $updatedCountry['status'],
+                'status' => $country->status,
                 'message' => 'Country status updated successfully!'
             ]);
             
         } catch (\Exception $e) {
-            \Log::error('Country status toggle failed: ' . $e->getMessage());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Error updating country status: ' . $e->getMessage()
-            ], 422);
+            // Fallback to session if database fails
+            try {
+                $countries = $this->getCountries();
+                if (!is_array($countries)) {
+                    $countries = [];
+                }
+                
+                // Find the country by ID
+                $countryFound = false;
+                $countries = array_map(function($country) use ($id, &$countryFound) {
+                    if ($country['id'] == $id) {
+                        $countryFound = true;
+                        // Toggle status between Active and Inactive
+                        $country['status'] = ($country['status'] === 'Active') ? 'Inactive' : 'Active';
+                    }
+                    return $country;
+                }, $countries);
+                
+                if (!$countryFound) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Country not found'
+                    ], 404);
+                }
+                
+                // Save back to session
+                session(['countries' => array_values($countries)]);
+                session()->save();
+                
+                // Get the updated country status
+                $updatedCountry = collect($countries)->firstWhere('id', $id);
+                
+                return response()->json([
+                    'success' => true,
+                    'status' => $updatedCountry['status'],
+                    'message' => 'Country status updated successfully!'
+                ]);
+            } catch (\Exception $sessionError) {
+                \Log::error('Country status toggle failed: ' . $sessionError->getMessage());
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error updating country status: ' . $sessionError->getMessage()
+                ], 422);
+            }
         }
     }
 
     public function deleteCountry($id)
     {
-        $countries = $this->getCountries();
-        if (!is_array($countries)) {
-            $countries = [];
+        // Try to delete from database first
+        try {
+            \App\Models\Country::findOrFail($id)->delete();
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $countries = $this->getCountries();
+            if (!is_array($countries)) {
+                $countries = [];
+            }
+            
+            $countries = array_filter($countries, function($country) use ($id) {
+                return $country['id'] != $id;
+            });
+            
+            session(['countries' => array_values($countries)]);
+            session()->save();
         }
-        
-        $countries = array_filter($countries, function($country) use ($id) {
-            return $country['id'] != $id;
-        });
-        
-        session(['countries' => array_values($countries)]);
-        session()->save();
         
         return redirect()->route('admin.countries.all')->with('success', 'Country deleted successfully!');
     }
@@ -2128,37 +2651,67 @@ class AdminController extends Controller
     }
 
     // Zones Management
-    private function getZones()
+    private function getZones($activeOnly = false)
     {
-        if (session()->has('zones')) {
-            return session('zones');
+        // Try to get from database first
+        $dbZones = \App\Models\Zone::orderBy('pincode', 'asc')->get();
+        
+        if ($dbZones->isNotEmpty()) {
+            // Convert to array format for backward compatibility
+            $zones = $dbZones->map(function($zone) {
+                return [
+                    'id' => $zone->id,
+                    'pincode' => $zone->pincode,
+                    'country' => $zone->country,
+                    'zone' => $zone->zone,
+                    'network' => $zone->network,
+                    'service' => $zone->service,
+                    'status' => $zone->status,
+                    'remark' => $zone->remark,
+                    'created_at' => $zone->created_at ? $zone->created_at->toDateTimeString() : now()->toDateTimeString(),
+                ];
+            })->toArray();
+        } else {
+            // Fallback to session if database is empty
+            if (session()->has('zones')) {
+                $zones = session('zones');
+            } else {
+                $defaultZones = [
+                    [
+                        'id' => 1,
+                        'pincode' => '110001',
+                        'country' => 'India',
+                        'zone' => 'Zone 1',
+                        'network' => 'DTDC',
+                        'service' => 'Express',
+                        'status' => 'Active',
+                        'remark' => 'Delhi zone',
+                    ],
+                    [
+                        'id' => 2,
+                        'pincode' => '400001',
+                        'country' => 'India',
+                        'zone' => 'Zone 2',
+                        'network' => 'Blue Dart',
+                        'service' => 'Economy',
+                        'status' => 'Active',
+                        'remark' => 'Mumbai zone',
+                    ],
+                ];
+                
+                session(['zones' => $defaultZones]);
+                $zones = $defaultZones;
+            }
         }
         
-        $defaultZones = [
-            [
-                'id' => 1,
-                'pincode' => '110001',
-                'country' => 'India',
-                'zone' => 'Zone 1',
-                'network' => 'DTDC',
-                'service' => 'Express',
-                'status' => 'Active',
-                'remark' => 'Delhi zone',
-            ],
-            [
-                'id' => 2,
-                'pincode' => '400001',
-                'country' => 'India',
-                'zone' => 'Zone 2',
-                'network' => 'Blue Dart',
-                'service' => 'Economy',
-                'status' => 'Active',
-                'remark' => 'Mumbai zone',
-            ],
-        ];
+        // Filter to return only Active zones if requested
+        if ($activeOnly) {
+            return array_filter($zones, function($zone) {
+                return ($zone['status'] ?? '') == 'Active';
+            });
+        }
         
-        session(['zones' => $defaultZones]);
-        return $defaultZones;
+        return $zones;
     }
 
     private function getZoneOptions()
@@ -2182,9 +2735,9 @@ class AdminController extends Controller
     public function createZone()
     {
         $zones = $this->getZones();
-        $countries = $this->getCountries();
-        $networks = $this->getNetworks();
-        $services = $this->getServices();
+        $countries = $this->getCountries(true); // Get only active countries for dropdown
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
+        $services = $this->getServices(true); // Get only active services for dropdown
         $zoneOptions = $this->getZoneOptions();
         return view('admin.zones.create', [
             'zones' => $zones,
@@ -2198,7 +2751,16 @@ class AdminController extends Controller
     public function allZones(Request $request)
     {
         $zones = $this->getZones();
-        $networks = $this->getNetworks();
+        $networks = $this->getNetworks(true); // Get only active networks for filtering
+        $services = $this->getServices(true); // Get only active services for filtering
+        
+        // Filter zones to only show those with existing active networks and services
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        $zones = array_filter($zones, function($zone) use ($networkNames, $serviceNames) {
+            return in_array($zone['network'] ?? '', $networkNames) &&
+                   in_array($zone['service'] ?? '', $serviceNames);
+        });
         
         // Apply search filter
         if ($request->filled('search')) {
@@ -2242,9 +2804,9 @@ class AdminController extends Controller
     {
         $zones = $this->getZones();
         $zone = collect($zones)->firstWhere('id', $id);
-        $countries = $this->getCountries();
-        $networks = $this->getNetworks();
-        $services = $this->getServices();
+        $countries = $this->getCountries(true); // Get only active countries for dropdown
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
+        $services = $this->getServices(true); // Get only active services for dropdown
         $zoneOptions = $this->getZoneOptions();
         
         if (!$zone) {
@@ -2273,43 +2835,141 @@ class AdminController extends Controller
             'status' => 'nullable',
         ]);
 
-        // Convert checkbox to status string
-        $statusValue = $request->input('status');
-        $status = ($statusValue === '1' || $statusValue === 'on' || $statusValue === true || $statusValue === 1) ? 'Active' : 'Inactive';
+        // Check if network and service exist (only check active ones)
+        $networks = $this->getNetworks(true);
+        $services = $this->getServices(true);
+        $countries = $this->getCountries(true);
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        $countryNames = collect($countries)->pluck('name')->toArray();
+        
+        if (!in_array($request->network, $networkNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Network does not exist or is inactive. Please create an active network first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Network does not exist or is inactive. Please create an active network first.');
+        }
+
+        if (!in_array($request->service, $serviceNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Service does not exist or is inactive. Please create an active service first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Service does not exist or is inactive. Please create an active service first.');
+        }
+        
+        if (!in_array($request->country, $countryNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Country does not exist or is inactive. Please create an active country first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Country does not exist or is inactive. Please create an active country first.');
+        }
 
         $zones = $this->getZones();
         if (!is_array($zones)) {
             $zones = [];
         }
         
-        $newId = count($zones) > 0 ? max(array_column($zones, 'id')) + 1 : 1;
-        
-        $newZone = [
-            'id' => $newId,
-            'pincode' => $request->pincode,
-            'country' => $request->country,
-            'zone' => $request->zone,
-            'network' => $request->network,
-            'service' => $request->service,
-            'status' => $status,
-            'remark' => $request->remark ?? '',
-            'created_at' => now()->toDateTimeString(),
-        ];
-        
-        $zones[] = $newZone;
-        session(['zones' => $zones]);
-        session()->save();
+        // Check if zone with same pincode already exists - update it instead of creating new
+        $existingZoneIndex = null;
+        foreach ($zones as $index => $zone) {
+            if (strcasecmp($zone['pincode'] ?? '', $request->pincode) === 0) {
+                $existingZoneIndex = $index;
+                break;
+            }
+        }
+
+        // Convert checkbox to status string
+        $statusValue = $request->input('status');
+        $status = ($statusValue === '1' || $statusValue === 'on' || $statusValue === true || $statusValue === 1) ? 'Active' : 'Inactive';
+
+        // Save to database
+        try {
+            // Check if zone with same pincode exists
+            $existingZone = \App\Models\Zone::where('pincode', $request->pincode)->first();
+            
+            if ($existingZone) {
+                // Update existing zone
+                $existingZone->update([
+                    'country' => $request->country,
+                    'zone' => $request->zone,
+                    'network' => $request->network,
+                    'service' => $request->service,
+                    'status' => $status,
+                    'remark' => $request->remark ?? '',
+                ]);
+                $message = 'Zone updated successfully! (Pincode already existed)';
+            } else {
+                // Create new zone
+                \App\Models\Zone::create([
+                    'pincode' => $request->pincode,
+                    'country' => $request->country,
+                    'zone' => $request->zone,
+                    'network' => $request->network,
+                    'service' => $request->service,
+                    'status' => $status,
+                    'remark' => $request->remark ?? '',
+                ]);
+                $message = 'Zone created successfully!';
+            }
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            if ($existingZoneIndex !== null) {
+                // Update existing zone
+                $existingZone = $zones[$existingZoneIndex];
+                $zones[$existingZoneIndex] = [
+                    'id' => $existingZone['id'],
+                    'pincode' => $request->pincode,
+                    'country' => $request->country,
+                    'zone' => $request->zone,
+                    'network' => $request->network,
+                    'service' => $request->service,
+                    'status' => $status,
+                    'remark' => $request->remark ?? '',
+                    'created_at' => $existingZone['created_at'] ?? now()->toDateTimeString(),
+                    'updated_at' => now()->toDateTimeString(),
+                ];
+                $message = 'Zone updated successfully! (Pincode already existed)';
+            } else {
+                // Create new zone
+                $newId = count($zones) > 0 ? max(array_column($zones, 'id')) + 1 : 1;
+                $newZone = [
+                    'id' => $newId,
+                    'pincode' => $request->pincode,
+                    'country' => $request->country,
+                    'zone' => $request->zone,
+                    'network' => $request->network,
+                    'service' => $request->service,
+                    'status' => $status,
+                    'remark' => $request->remark ?? '',
+                    'created_at' => now()->toDateTimeString(),
+                ];
+                $zones[] = $newZone;
+                $message = 'Zone created successfully!';
+            }
+            
+            session(['zones' => $zones]);
+            session()->save();
+        }
 
         // Return JSON response for AJAX requests
         if ($request->ajax() || $request->wantsJson()) {
             return response()->json([
                 'success' => true,
-                'message' => 'Zone created successfully!',
+                'message' => $message,
                 'redirect' => route('admin.zones.all')
             ]);
         }
 
-        return redirect()->route('admin.zones.all')->with('success', 'Zone created successfully!');
+        return redirect()->route('admin.zones.all')->with('success', $message);
     }
 
     public function updateZone(Request $request, $id)
@@ -2323,6 +2983,44 @@ class AdminController extends Controller
             'remark' => 'nullable|string',
             'status' => 'nullable',
         ]);
+
+        // Check if network and service exist (only check active ones)
+        $networks = $this->getNetworks(true);
+        $services = $this->getServices(true);
+        $countries = $this->getCountries(true);
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        $countryNames = collect($countries)->pluck('name')->toArray();
+        
+        if (!in_array($request->network, $networkNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Network does not exist or is inactive. Please create an active network first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Network does not exist or is inactive. Please create an active network first.');
+        }
+
+        if (!in_array($request->service, $serviceNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Service does not exist or is inactive. Please create an active service first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Service does not exist or is inactive. Please create an active service first.');
+        }
+        
+        if (!in_array($request->country, $countryNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Country does not exist or is inactive. Please create an active country first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Country does not exist or is inactive. Please create an active country first.');
+        }
 
         // Convert checkbox to status string
         $statusValue = $request->input('status');
@@ -2367,17 +3065,23 @@ class AdminController extends Controller
 
     public function deleteZone($id)
     {
-        $zones = $this->getZones();
-        if (!is_array($zones)) {
-            $zones = [];
+        // Try to delete from database first
+        try {
+            \App\Models\Zone::findOrFail($id)->delete();
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $zones = $this->getZones();
+            if (!is_array($zones)) {
+                $zones = [];
+            }
+            
+            $zones = array_filter($zones, function($zone) use ($id) {
+                return $zone['id'] != $id;
+            });
+            
+            session(['zones' => array_values($zones)]);
+            session()->save();
         }
-        
-        $zones = array_filter($zones, function($zone) use ($id) {
-            return $zone['id'] != $id;
-        });
-        
-        session(['zones' => array_values($zones)]);
-        session()->save();
         
         return redirect()->route('admin.zones.all')->with('success', 'Zone deleted successfully!');
     }
@@ -2472,10 +3176,10 @@ class AdminController extends Controller
     public function createShippingCharge()
     {
         $shippingCharges = $this->getShippingCharges();
-        $countries = $this->getCountries();
-        $zones = $this->getZones();
-        $networks = $this->getNetworks();
-        $services = $this->getServices();
+        $countries = $this->getCountries(true); // Get only active countries for dropdown
+        $zones = $this->getZones(true); // Get only active zones for dropdown
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
+        $services = $this->getServices(true); // Get only active services for dropdown
         $shipmentTypes = $this->getShipmentTypes();
         
         // Get zone options (includes No Zone, Remote, and Zone 1-60)
@@ -2494,7 +3198,38 @@ class AdminController extends Controller
     public function allShippingCharges(Request $request)
     {
         $shippingCharges = $this->getShippingCharges();
-        $networks = $this->getNetworks();
+        $networks = $this->getNetworks(true); // Get only active networks for filtering
+        $services = $this->getServices(true); // Get only active services for filtering
+        $countries = $this->getCountries(true); // Get only active countries for filtering
+        
+        // Filter shipping charges to only show those with existing active networks, services, and countries
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        $countryNames = collect($countries)->pluck('name')->toArray();
+        
+        $shippingCharges = array_filter($shippingCharges, function($charge) use ($networkNames, $serviceNames, $countryNames) {
+            // Check if network exists
+            if (!in_array($charge['network'] ?? '', $networkNames)) {
+                return false;
+            }
+            
+            // Check if service exists
+            if (!in_array($charge['service'] ?? '', $serviceNames)) {
+                return false;
+            }
+            
+            // Check if origin exists (country)
+            if (!in_array($charge['origin'] ?? '', $countryNames)) {
+                return false;
+            }
+            
+            // Check if destination exists (country)
+            if (!in_array($charge['destination'] ?? '', $countryNames)) {
+                return false;
+            }
+            
+            return true;
+        });
         
         // Apply search filter
         if ($request->filled('search')) {
@@ -2539,10 +3274,10 @@ class AdminController extends Controller
     {
         $shippingCharges = $this->getShippingCharges();
         $charge = collect($shippingCharges)->firstWhere('id', $id);
-        $countries = $this->getCountries();
-        $zones = $this->getZones();
-        $networks = $this->getNetworks();
-        $services = $this->getServices();
+        $countries = $this->getCountries(true); // Get only active countries for dropdown
+        $zones = $this->getZones(true); // Get only active zones for dropdown
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
+        $services = $this->getServices(true); // Get only active services for dropdown
         $shipmentTypes = $this->getShipmentTypes();
         
         // Get zone options (includes No Zone, Remote, and Zone 1-60)
@@ -2579,13 +3314,96 @@ class AdminController extends Controller
             'remark' => 'nullable|string',
         ]);
 
+        // Check if network and service exist
+        $networks = $this->getNetworks();
+        $services = $this->getServices();
+        $countries = $this->getCountries();
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        $countryNames = collect($countries)->pluck('name')->toArray();
+        
+        if (!in_array($request->network, $networkNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Network does not exist. Please create the network first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Network does not exist. Please create the network first.');
+        }
+
+        if (!in_array($request->service, $serviceNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Service does not exist. Please create the service first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Service does not exist. Please create the service first.');
+        }
+
+        if (!in_array($request->origin, $countryNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Origin country does not exist. Please create the country first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Origin country does not exist. Please create the country first.');
+        }
+
+        if (!in_array($request->destination, $countryNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Destination country does not exist. Please create the country first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Destination country does not exist. Please create the country first.');
+        }
+
         $shippingCharges = $this->getShippingCharges();
         if (!is_array($shippingCharges)) {
             $shippingCharges = [];
         }
         
-        $newId = count($shippingCharges) > 0 ? max(array_column($shippingCharges, 'id')) + 1 : 1;
-        
+        // Check if shipping charge with same origin, destination, zones, network, service already exists - update it
+        $existingChargeIndex = null;
+        foreach ($shippingCharges as $index => $charge) {
+            if (strcasecmp($charge['origin'] ?? '', $request->origin) === 0 &&
+                strcasecmp($charge['destination'] ?? '', $request->destination) === 0 &&
+                strcasecmp($charge['origin_zone'] ?? '', $request->origin_zone) === 0 &&
+                strcasecmp($charge['destination_zone'] ?? '', $request->destination_zone) === 0 &&
+                strcasecmp($charge['network'] ?? '', $request->network) === 0 &&
+                strcasecmp($charge['service'] ?? '', $request->service) === 0) {
+                $existingChargeIndex = $index;
+                break;
+            }
+        }
+
+        if ($existingChargeIndex !== null) {
+            // Update existing charge
+            $existingCharge = $shippingCharges[$existingChargeIndex];
+            $shippingCharges[$existingChargeIndex] = [
+                'id' => $existingCharge['id'],
+                'origin' => $request->origin,
+                'origin_zone' => $request->origin_zone,
+                'destination' => $request->destination,
+                'destination_zone' => $request->destination_zone,
+                'shipment_type' => $request->shipment_type,
+                'min_weight' => $request->min_weight,
+                'max_weight' => $request->max_weight,
+                'network' => $request->network,
+                'service' => $request->service,
+                'rate' => $request->rate,
+                'remark' => $request->remark ?? '',
+                'created_at' => $existingCharge['created_at'] ?? now()->toDateTimeString(),
+                'updated_at' => now()->toDateTimeString(),
+            ];
+            $message = 'Shipping charge updated successfully! (Existing record found)';
+        } else {
+            // Create new charge
+            $newId = count($shippingCharges) > 0 ? max(array_column($shippingCharges, 'id')) + 1 : 1;
         $newCharge = [
             'id' => $newId,
             'origin' => $request->origin,
@@ -2601,8 +3419,10 @@ class AdminController extends Controller
             'remark' => $request->remark ?? '',
             'created_at' => now()->toDateTimeString(),
         ];
-        
         $shippingCharges[] = $newCharge;
+            $message = 'Shipping charge created successfully!';
+        }
+        
         session(['shipping_charges' => $shippingCharges]);
         session()->save();
 
@@ -2610,12 +3430,12 @@ class AdminController extends Controller
         if ($request->ajax() || $request->wantsJson()) {
             return response()->json([
                 'success' => true,
-                'message' => 'Shipping charge created successfully!',
+                'message' => $message,
                 'redirect' => route('admin.shipping-charges.all')
             ]);
         }
 
-        return redirect()->route('admin.shipping-charges.all')->with('success', 'Shipping charge created successfully!');
+        return redirect()->route('admin.shipping-charges.all')->with('success', $message);
     }
 
     public function updateShippingCharge(Request $request, $id)
@@ -2633,6 +3453,54 @@ class AdminController extends Controller
             'rate' => 'required|numeric|min:0',
             'remark' => 'nullable|string',
         ]);
+
+        // Check if network and service exist
+        $networks = $this->getNetworks();
+        $services = $this->getServices();
+        $countries = $this->getCountries();
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        $countryNames = collect($countries)->pluck('name')->toArray();
+        
+        if (!in_array($request->network, $networkNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Network does not exist. Please create the network first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Network does not exist. Please create the network first.');
+        }
+
+        if (!in_array($request->service, $serviceNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Service does not exist. Please create the service first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Service does not exist. Please create the service first.');
+        }
+
+        if (!in_array($request->origin, $countryNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Origin country does not exist. Please create the country first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Origin country does not exist. Please create the country first.');
+        }
+
+        if (!in_array($request->destination, $countryNames)) {
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Destination country does not exist. Please create the country first.',
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', 'Destination country does not exist. Please create the country first.');
+        }
 
         $shippingCharges = $this->getShippingCharges();
         if (!is_array($shippingCharges)) {
@@ -2728,41 +3596,50 @@ class AdminController extends Controller
     }
 
     // Formulas Management
-    private function getFormulas()
+    private function getFormulas($activeOnly = false)
     {
         if (session()->has('formulas')) {
-            return session('formulas');
+            $formulas = session('formulas');
+        } else {
+            $defaultFormulas = [
+                [
+                    'id' => 1,
+                    'formula_name' => 'Express Delivery Fee',
+                    'network' => 'DTDC',
+                    'service' => 'Express',
+                    'type' => 'Fixed',
+                    'scope' => 'Flat',
+                    'priority' => '1st',
+                    'value' => 50.00,
+                    'status' => 'Active',
+                    'remark' => 'Fixed fee for express delivery',
+                ],
+                [
+                    'id' => 2,
+                    'formula_name' => 'Weight Based Charge',
+                    'network' => 'Blue Dart',
+                    'service' => 'Economy',
+                    'type' => 'Percentage',
+                    'scope' => 'per kg',
+                    'priority' => '2nd',
+                    'value' => 10.5,
+                    'status' => 'Active',
+                    'remark' => '10.5% per kg',
+                ],
+            ];
+            
+            session(['formulas' => $defaultFormulas]);
+            $formulas = $defaultFormulas;
         }
         
-        $defaultFormulas = [
-            [
-                'id' => 1,
-                'formula_name' => 'Express Delivery Fee',
-                'network' => 'DTDC',
-                'service' => 'Express',
-                'type' => 'Fixed',
-                'scope' => 'Flat',
-                'priority' => '1st',
-                'value' => 50.00,
-                'status' => 'Active',
-                'remark' => 'Fixed fee for express delivery',
-            ],
-            [
-                'id' => 2,
-                'formula_name' => 'Weight Based Charge',
-                'network' => 'Blue Dart',
-                'service' => 'Economy',
-                'type' => 'Percentage',
-                'scope' => 'per kg',
-                'priority' => '2nd',
-                'value' => 10.5,
-                'status' => 'Active',
-                'remark' => '10.5% per kg',
-            ],
-        ];
+        // Filter to return only Active formulas if requested
+        if ($activeOnly) {
+            return array_filter($formulas, function($formula) {
+                return ($formula['status'] ?? '') == 'Active';
+            });
+        }
         
-        session(['formulas' => $defaultFormulas]);
-        return $defaultFormulas;
+        return $formulas;
     }
 
     private function getFormulaTypes()
@@ -2780,7 +3657,7 @@ class AdminController extends Controller
         return strtolower(trim($priority ?? ''));
     }
 
-    private function priorityExists(string $priority, ?int $ignoreId = null): bool
+    private function priorityExists(string $priority, string $network, string $service, ?int $ignoreId = null): bool
     {
         $normalized = $this->normalizePriority($priority);
         if ($normalized === '') {
@@ -2793,7 +3670,13 @@ class AdminController extends Controller
                 continue;
             }
 
-            if ($this->normalizePriority($formula['priority'] ?? '') === $normalized) {
+            // Check if priority exists for the same network and service combination
+            $formulaNetwork = $formula['network'] ?? '';
+            $formulaService = $formula['service'] ?? '';
+            
+            if (strcasecmp($formulaNetwork, $network) === 0 && 
+                strcasecmp($formulaService, $service) === 0 &&
+                $this->normalizePriority($formula['priority'] ?? '') === $normalized) {
                 return true;
             }
         }
@@ -2809,8 +3692,8 @@ class AdminController extends Controller
     public function createFormula()
     {
         $formulas = $this->getFormulas();
-        $networks = $this->getNetworks();
-        $services = $this->getServices();
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
+        $services = $this->getServices(true); // Get only active services for dropdown
         $types = $this->getFormulaTypes();
         $scopes = $this->getFormulaScopes();
         return view('admin.formulas.create', [
@@ -2826,8 +3709,8 @@ class AdminController extends Controller
     {
         $formulas = $this->getFormulas();
         
-        // Get networks - prioritize database, fallback to session
-        $dbNetworks = Network::all();
+        // Get networks - prioritize database, fallback to session (only active)
+        $dbNetworks = Network::where('status', 'Active')->get();
         $networks = [];
         if ($dbNetworks->isNotEmpty()) {
             $networks = $dbNetworks->map(function($network) {
@@ -2839,9 +3722,37 @@ class AdminController extends Controller
                 ];
             })->toArray();
         } else {
-            // Fallback to session networks
-            $networks = $this->getNetworks();
+            // Fallback to session networks (only active)
+            $networks = $this->getNetworks(true);
         }
+        
+        // Get services to validate against (only active)
+        $services = $this->getServices(true);
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        
+        // Filter formulas to only show those where service exists and has its network
+        $formulas = array_filter($formulas, function($formula) use ($networkNames, $serviceNames, $services) {
+            $formulaNetwork = $formula['network'] ?? '';
+            $formulaService = $formula['service'] ?? '';
+            
+            // Check if network exists
+            if (!in_array($formulaNetwork, $networkNames)) {
+                return false;
+            }
+            
+            // Check if service exists
+            if (!in_array($formulaService, $serviceNames)) {
+                return false;
+            }
+            
+            // Check if service has this network
+            $service = collect($services)->first(function($svc) use ($formulaService) {
+                return strcasecmp($svc['name'] ?? '', $formulaService) === 0;
+            });
+            
+            return $service && strcasecmp($service['network'] ?? '', $formulaNetwork) === 0;
+        });
         
         // Apply search filter
         if ($request->filled('search')) {
@@ -2896,8 +3807,8 @@ class AdminController extends Controller
     {
         $formulas = $this->getFormulas();
         $formula = collect($formulas)->firstWhere('id', $id);
-        $networks = $this->getNetworks();
-        $services = $this->getServices();
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
+        $services = $this->getServices(true); // Get only active services for dropdown
         $types = $this->getFormulaTypes();
         $scopes = $this->getFormulaScopes();
         
@@ -2929,9 +3840,53 @@ class AdminController extends Controller
             'status' => 'nullable',
         ]);
 
+        // Check if network and service exist and service has this network
+        $networks = $this->getNetworks();
+        $services = $this->getServices();
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        
+        if (!in_array($request->network, $networkNames)) {
+            $message = 'Network does not exist. Please create the network first.';
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', $message);
+        }
+
+        if (!in_array($request->service, $serviceNames)) {
+            $message = 'Service does not exist. Please create the service first.';
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', $message);
+        }
+
+        // Check if service has this network
+        $service = collect($services)->first(function($svc) use ($request) {
+            return strcasecmp($svc['name'] ?? '', $request->service) === 0;
+        });
+
+        if (!$service || strcasecmp($service['network'] ?? '', $request->network) !== 0) {
+            $message = 'Selected service does not belong to the selected network.';
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', $message);
+        }
+
         $priorityValue = trim($request->priority);
-        if ($this->priorityExists($priorityValue)) {
-            $message = 'Priority already exists. Please choose another value.';
+        if ($this->priorityExists($priorityValue, $request->network, $request->service)) {
+            $message = 'Priority already exists for this network and service combination. Please choose another value.';
             if ($request->ajax() || $request->wantsJson()) {
                 return response()->json([
                     'success' => false,
@@ -2999,9 +3954,53 @@ class AdminController extends Controller
             'status' => 'nullable',
         ]);
 
+        // Check if network and service exist and service has this network
+        $networks = $this->getNetworks();
+        $services = $this->getServices();
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $serviceNames = collect($services)->pluck('name')->toArray();
+        
+        if (!in_array($request->network, $networkNames)) {
+            $message = 'Network does not exist. Please create the network first.';
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', $message);
+        }
+
+        if (!in_array($request->service, $serviceNames)) {
+            $message = 'Service does not exist. Please create the service first.';
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', $message);
+        }
+
+        // Check if service has this network
+        $service = collect($services)->first(function($svc) use ($request) {
+            return strcasecmp($svc['name'] ?? '', $request->service) === 0;
+        });
+
+        if (!$service || strcasecmp($service['network'] ?? '', $request->network) !== 0) {
+            $message = 'Selected service does not belong to the selected network.';
+            if ($request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $message,
+                ], 422);
+            }
+            return redirect()->back()->withInput()->with('error', $message);
+        }
+
         $priorityValue = trim($request->priority);
-        if ($this->priorityExists($priorityValue, (int)$id)) {
-            $message = 'Priority already exists. Please choose another value.';
+        if ($this->priorityExists($priorityValue, $request->network, $request->service, (int)$id)) {
+            $message = 'Priority already exists for this network and service combination. Please choose another value.';
             if ($request->ajax() || $request->wantsJson()) {
                 return response()->json([
                     'success' => false,
@@ -3205,23 +4204,173 @@ class AdminController extends Controller
     {
         $awbNumber = $request->input('awb_number');
         $awb = null;
+        $zoneInfo = null;
+        $networkTransactions = [];
+        $totalAmount = 0;
+        $supportTicketCount = 0;
         
         if ($awbNumber) {
+            // Search from database first (AwbUpload model)
+            $awbUpload = \App\Models\AwbUpload::where('awb_no', $awbNumber)->first();
+            
+            if ($awbUpload) {
+                // Convert to array for compatibility
+                $awb = $awbUpload->toArray();
+                
+                // Get zone information based on origin and destination pincodes
+                $zones = $this->getZones();
+                $originPincode = $awbUpload->origin_zone_pincode ?? null;
+                $destinationPincode = $awbUpload->destination_zone_pincode ?? null;
+                
+                $originZone = null;
+                $destinationZone = null;
+                
+                if ($originPincode) {
+                    $originZone = collect($zones)->first(function($zone) use ($originPincode) {
+                        return strcasecmp($zone['pincode'] ?? '', $originPincode) === 0;
+                    });
+                }
+                
+                if ($destinationPincode) {
+                    $destinationZone = collect($zones)->first(function($zone) use ($destinationPincode) {
+                        return strcasecmp($zone['pincode'] ?? '', $destinationPincode) === 0;
+                    });
+                }
+                
+                $zoneInfo = [
+                    'origin' => $originZone,
+                    'destination' => $destinationZone,
+                ];
+                
+                // Get network transactions (amounts) related to this AWB
+                $transactions = \App\Models\NetworkTransaction::where('awb_no', $awbNumber)
+                    ->with('network')
+                    ->orderBy('created_at', 'desc')
+                    ->get();
+                
+                $networkTransactions = $transactions->map(function($transaction) {
+                    return [
+                        'id' => $transaction->id,
+                        'network_name' => $transaction->network->name ?? 'N/A',
+                        'type' => $transaction->type,
+                        'amount' => $transaction->amount,
+                        'transaction_type' => $transaction->transaction_type,
+                        'description' => $transaction->description,
+                        'created_at' => $transaction->created_at,
+                        'balance_after' => $transaction->balance_after,
+                    ];
+                })->toArray();
+                
+                // Calculate total amount (sum of all transaction amounts)
+                $totalAmount = $transactions->sum('amount');
+                
+                // Get support ticket count - check if AWB number is mentioned in subject or message
+                // Use distinct to avoid counting duplicates
+                $ticketIds = \App\Models\SupportTicket::where(function($query) use ($awbNumber) {
+                    $query->where('subject', 'like', '%' . $awbNumber . '%')
+                          ->orWhere('message', 'like', '%' . $awbNumber . '%');
+                })->pluck('id')->toArray();
+                
+                // Also check via bookings - if any booking has this AWB number and has tickets
+                $bookings = $this->getBookings();
+                $directEntryBookings = session('direct_entry_bookings', []);
+                $allBookings = array_merge(
+                    is_array($bookings) ? $bookings : [],
+                    is_array($directEntryBookings) ? $directEntryBookings : []
+                );
+                
+                // Check if any booking with this AWB has tickets linked (via user_id)
+                // Only count tickets that mention the AWB number in subject/message
+                foreach ($allBookings as $booking) {
+                    if (isset($booking['awb_no']) && strcasecmp($booking['awb_no'], $awbNumber) === 0) {
+                        if (isset($booking['user_id'])) {
+                            $userTicketIds = \App\Models\SupportTicket::where('user_id', $booking['user_id'])
+                                ->where(function($query) use ($awbNumber) {
+                                    $query->where('subject', 'like', '%' . $awbNumber . '%')
+                                          ->orWhere('message', 'like', '%' . $awbNumber . '%');
+                                })
+                                ->pluck('id')
+                                ->toArray();
+                            $ticketIds = array_merge($ticketIds, $userTicketIds);
+                        }
+                    }
+                }
+                
+                // Get unique ticket count
+                $supportTicketCount = count(array_unique($ticketIds));
+                
+                // Add to history
+                $this->addToHistory($awb);
+            } else {
+                // Fallback to session if not found in database
             $awbUploads = $this->getAwbUploads();
-            // Search by AWB number in AWB Upload data
             $awb = collect($awbUploads)->first(function ($item) use ($awbNumber) {
                 return strtoupper($item['awb_no']) === strtoupper($awbNumber);
             });
             
-            // If AWB found, add to history
             if ($awb) {
                 $this->addToHistory($awb);
+                    
+                    // Try to get zone info and transactions even for session data
+                    $zones = $this->getZones();
+                    $originPincode = $awb['origin_pin'] ?? $awb['origin_zone_pincode'] ?? null;
+                    $destinationPincode = $awb['destination_pin'] ?? $awb['destination_zone_pincode'] ?? null;
+                    
+                    $originZone = null;
+                    $destinationZone = null;
+                    
+                    if ($originPincode) {
+                        $originZone = collect($zones)->first(function($zone) use ($originPincode) {
+                            return strcasecmp($zone['pincode'] ?? '', $originPincode) === 0;
+                        });
+                    }
+                    
+                    if ($destinationPincode) {
+                        $destinationZone = collect($zones)->first(function($zone) use ($destinationPincode) {
+                            return strcasecmp($zone['pincode'] ?? '', $destinationPincode) === 0;
+                        });
+                    }
+                    
+                    $zoneInfo = [
+                        'origin' => $originZone,
+                        'destination' => $destinationZone,
+                    ];
+                    
+                    // Get network transactions
+                    $transactions = \App\Models\NetworkTransaction::where('awb_no', $awbNumber)->get();
+                    $networkTransactions = $transactions->map(function($transaction) {
+                        return [
+                            'id' => $transaction->id,
+                            'network_name' => $transaction->network->name ?? 'N/A',
+                            'type' => $transaction->type,
+                            'amount' => $transaction->amount,
+                            'transaction_type' => $transaction->transaction_type,
+                            'description' => $transaction->description,
+                            'created_at' => $transaction->created_at,
+                            'balance_after' => $transaction->balance_after,
+                        ];
+                    })->toArray();
+                    
+                    $totalAmount = $transactions->sum('amount');
+                    
+                    // Get support ticket count
+                    $ticketIds = \App\Models\SupportTicket::where(function($query) use ($awbNumber) {
+                        $query->where('subject', 'like', '%' . $awbNumber . '%')
+                              ->orWhere('message', 'like', '%' . $awbNumber . '%');
+                    })->pluck('id')->toArray();
+                    
+                    $supportTicketCount = count($ticketIds);
+                }
             }
         }
         
         return view('admin.search-with-awb.search', [
             'awb' => $awb,
             'awbNumber' => $awbNumber ?? '',
+            'zoneInfo' => $zoneInfo,
+            'networkTransactions' => $networkTransactions,
+            'totalAmount' => $totalAmount,
+            'supportTicketCount' => $supportTicketCount,
         ]);
     }
 
@@ -3452,10 +4601,50 @@ class AdminController extends Controller
     // AWB Upload Management
     private function getAwbUploads()
     {
+        // Try to get from database first
+        $dbAwbUploads = AwbUpload::orderBy('awb_no', 'asc')->get();
+        
+        if ($dbAwbUploads->isNotEmpty()) {
+            // Convert to array format for backward compatibility
+            return $dbAwbUploads->map(function($awb) {
+                return [
+                    'id' => $awb->id,
+                    'awb_no' => $awb->awb_no,
+                    'date_of_sale' => $awb->date_of_sale,
+                    'branch' => $awb->branch,
+                    'hub' => $awb->hub,
+                    'status' => $awb->status,
+                    'booking_type' => $awb->booking_type,
+                    'shipment_type' => $awb->shipment_type,
+                    'destination' => $awb->destination,
+                    'consignee' => $awb->consignee,
+                    'origin_zone_pincode' => $awb->origin_zone_pincode,
+                    'destination_zone_pincode' => $awb->destination_zone_pincode,
+                    'pk' => $awb->pk,
+                    'actual_weight' => $awb->actual_weight,
+                    'volumetric_weight' => $awb->volumetric_weight,
+                    'chargeable_weight' => $awb->chargeable_weight,
+                    'network' => $awb->network_name,
+                    'service' => $awb->service_name,
+                    'network_name' => $awb->network_name,
+                    'service_name' => $awb->service_name,
+                    'amour' => $awb->amour,
+                    'consignor' => $awb->consignor,
+                    'consignee_name' => $awb->consignee,
+                    'origin_pin' => $awb->origin_zone_pincode,
+                    'destination_pin' => $awb->destination_zone_pincode,
+                    'display_service_name' => $awb->display_service_name,
+                    'operation_remark' => $awb->operation_remark,
+                ];
+            })->toArray();
+        }
+        
+        // Fallback to session
         if (session()->has('awb_uploads')) {
             return session('awb_uploads');
         }
         
+        // Initialize with default if both are empty
         $defaultUploads = [
             [
                 'id' => 1,
@@ -3510,9 +4699,9 @@ class AdminController extends Controller
     public function createAwbUpload()
     {
         $awbUploads = $this->getAwbUploads();
-        $countries = $this->getCountries();
-        $networks = $this->getNetworks();
-        $services = $this->getServices();
+        $countries = $this->getCountries(true); // Get only active countries for dropdown
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
+        $services = $this->getServices(true); // Get only active services for dropdown
         $bookingTypes = $this->getBookingTypes();
         $shipmentTypes = $this->getShipmentTypesForUpload();
         return view('admin.awb-upload.create', [
@@ -3596,9 +4785,9 @@ class AdminController extends Controller
     {
         $awbUploads = $this->getAwbUploads();
         $upload = collect($awbUploads)->firstWhere('id', $id);
-        $countries = $this->getCountries();
-        $networks = $this->getNetworks();
-        $services = $this->getServices();
+        $countries = $this->getCountries(true); // Get only active countries for dropdown
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
+        $services = $this->getServices(true); // Get only active services for dropdown
         $bookingTypes = $this->getBookingTypes();
         $shipmentTypes = $this->getShipmentTypesForUpload();
         if (!$upload) {
@@ -3619,7 +4808,7 @@ class AdminController extends Controller
     public function storeAwbUpload(Request $request)
     {
         $request->validate([
-            'awb_no' => 'required|string|max:255|regex:/^[a-zA-Z0-9]+$/',
+            'awb_no' => 'required|string|max:255',
             'type' => 'required|string|in:domestic,international',
             'origin' => 'required|string|max:255',
             'origin_zone' => 'required|string|max:255',
@@ -3650,7 +4839,10 @@ class AdminController extends Controller
             'payment_deduct' => 'nullable|string|in:Yes,No',
             'location' => 'nullable|string|max:255',
             'forwarding_service' => 'nullable|string|max:255',
+            'remark_1' => 'nullable|string',
+            'remark_2' => 'nullable|string',
             'remark_3' => 'nullable|string',
+            'forwarding_number' => 'nullable|string|max:255',
             'branch' => 'required|string|max:255',
             'hub' => 'required|string|max:255',
         ]);
@@ -3718,7 +4910,7 @@ class AdminController extends Controller
     public function updateAwbUpload(Request $request, $id)
     {
         $request->validate([
-            'awb_no' => 'required|string|max:255|regex:/^[a-zA-Z0-9]+$/',
+            'awb_no' => 'required|string|max:255',
             'date_of_sale' => 'nullable|date',
             'branch' => 'nullable|string|max:255',
             'hub' => 'nullable|string|max:255',
@@ -3971,10 +5163,10 @@ class AdminController extends Controller
     {
         $bookings = $this->getBookings();
         $awbUploads = $this->getAwbUploads();
-        $countries = $this->getCountries();
+        $countries = $this->getCountries(true); // Get only active countries for dropdown
         $shipmentTypes = $this->getShipmentTypesForBooking();
         $bookingTypes = $this->getBookingTypes();
-        $networks = $this->getNetworks();
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
         
         return view('admin.bookings.create', [
             'bookings' => $bookings,
@@ -4026,10 +5218,10 @@ class AdminController extends Controller
         $bookings = $this->getBookings();
         $booking = collect($bookings)->firstWhere('id', $id);
         $awbUploads = $this->getAwbUploads();
-        $countries = $this->getCountries();
+        $countries = $this->getCountries(true); // Get only active countries for dropdown
         $shipmentTypes = $this->getShipmentTypesForBooking();
         $bookingTypes = $this->getBookingTypes();
-        $networks = $this->getNetworks();
+        $networks = $this->getNetworks(true); // Get only active networks for dropdown
         
         if (!$booking) {
             return redirect()->route('admin.bookings.all')->with('error', 'Booking not found');
@@ -5201,18 +6393,84 @@ class AdminController extends Controller
     }
 
     // Reports Management
+    public function reportsIndex()
+    {
+        return view('admin.reports.index');
+    }
+
+    public function getReportContent(Request $request, $reportType)
+    {
+        // Map report types to their methods and views
+        $reportConfig = [
+            'zone' => ['method' => 'zoneReport', 'view' => 'admin.reports.zone'],
+            'formula' => ['method' => 'formulaReport', 'view' => 'admin.reports.formula'],
+            'shipping-charges' => ['method' => 'shippingChargesReport', 'view' => 'admin.reports.shipping-charges'],
+            'booking' => ['method' => 'bookingReport', 'view' => 'admin.reports.booking'],
+            'payment' => ['method' => 'paymentReport', 'view' => 'admin.reports.payment'],
+            'transaction' => ['method' => 'transactionReport', 'view' => 'admin.reports.transaction'],
+            'network' => ['method' => 'networkReport', 'view' => 'admin.reports.network'],
+            'service' => ['method' => 'serviceReport', 'view' => 'admin.reports.service'],
+            'country' => ['method' => 'countryReport', 'view' => 'admin.reports.country'],
+            'bank' => ['method' => 'bankReport', 'view' => 'admin.reports.bank'],
+            'wallet' => ['method' => 'walletReport', 'view' => 'admin.reports.wallet'],
+        ];
+
+        if (!isset($reportConfig[$reportType])) {
+            abort(404, 'Report not found');
+        }
+
+        $config = $reportConfig[$reportType];
+        $method = $config['method'];
+        $viewName = $config['view'];
+        
+        // Call the appropriate report method to get the view with data
+        $viewResponse = $this->$method($request);
+        
+        // Extract data from the view response
+        $viewData = $viewResponse->getData();
+        
+        // Render the view and extract just the content section
+        // Since views extend layouts, we need to render the full view and extract content
+        $fullHtml = $viewResponse->render();
+        
+        // Extract content between @section('content') and @endsection
+        // For now, we'll return the full rendered view and let JavaScript handle it
+        // Or we can create a wrapper that strips the layout
+        
+        // Better approach: Return the view response but mark it as AJAX request
+        // The view will be rendered fully, but we'll handle it in JavaScript
+        return response($fullHtml)->header('Content-Type', 'text/html');
+    }
+
     public function zoneReport(Request $request)
     {
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $search = $request->query('search');
 
         $zones = $this->normalizeReportTimestamps($this->getZones(), 'zones');
         $zones = $this->filterCollectionByDate($zones, $dateFrom, $dateTo);
+
+        // Apply search filter
+        if ($search) {
+            $searchLower = strtolower($search);
+            $zones = array_filter($zones, function($zone) use ($searchLower) {
+                return strpos(strtolower($zone['pincode'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($zone['country'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($zone['zone'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($zone['network'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($zone['service'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($zone['status'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($zone['remark'] ?? ''), $searchLower) !== false;
+            });
+            $zones = array_values($zones);
+        }
 
         return view('admin.reports.zone', [
             'zones' => $zones,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'search' => $search,
         ]);
     }
     
@@ -5299,14 +6557,31 @@ class AdminController extends Controller
     {
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $search = $request->query('search');
 
         $formulas = $this->normalizeReportTimestamps($this->getFormulas(), 'formulas');
         $formulas = $this->filterCollectionByDate($formulas, $dateFrom, $dateTo);
+
+        // Apply search filter
+        if ($search) {
+            $searchLower = strtolower($search);
+            $formulas = array_filter($formulas, function($formula) use ($searchLower) {
+                return strpos(strtolower($formula['formula_name'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($formula['network'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($formula['service'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($formula['type'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($formula['scope'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($formula['status'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($formula['remark'] ?? ''), $searchLower) !== false;
+            });
+            $formulas = array_values($formulas);
+        }
 
         return view('admin.reports.formula', [
             'formulas' => $formulas,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'search' => $search,
         ]);
     }
 
@@ -5314,14 +6589,32 @@ class AdminController extends Controller
     {
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $search = $request->query('search');
 
         $shippingCharges = $this->normalizeReportTimestamps($this->getShippingCharges(), 'shipping_charges');
         $shippingCharges = $this->filterCollectionByDate($shippingCharges, $dateFrom, $dateTo);
+
+        // Apply search filter
+        if ($search) {
+            $searchLower = strtolower($search);
+            $shippingCharges = array_filter($shippingCharges, function($charge) use ($searchLower) {
+                return strpos(strtolower($charge['origin'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($charge['origin_zone'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($charge['destination'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($charge['destination_zone'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($charge['shipment_type'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($charge['network'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($charge['service'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($charge['remark'] ?? ''), $searchLower) !== false;
+            });
+            $shippingCharges = array_values($shippingCharges);
+        }
 
         return view('admin.reports.shipping-charges', [
             'shippingCharges' => $shippingCharges,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'search' => $search,
         ]);
     }
 
@@ -5426,14 +6719,28 @@ class AdminController extends Controller
     {
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $search = $request->query('search');
 
         $payments = $this->normalizeReportTimestamps(session('payments', []), null, 'payment_date');
         $payments = $this->filterCollectionByDate($payments, $dateFrom, $dateTo, 'payment_date');
+
+        // Apply search filter
+        if ($search) {
+            $searchLower = strtolower($search);
+            $payments = array_filter($payments, function($payment) use ($searchLower) {
+                return strpos(strtolower($payment['payment_method'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($payment['status'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($payment['reference'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($payment['payment_date'] ?? ''), $searchLower) !== false;
+            });
+            $payments = array_values($payments);
+        }
 
         return view('admin.reports.payment', [
             'payments' => $payments,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'search' => $search,
         ]);
     }
 
@@ -5652,14 +6959,21 @@ class AdminController extends Controller
      */
     public function exportTransactionReport(Request $request)
     {
-        $category = $request->get('category', '');
-        $hub = $request->get('hub', '');
-        $branch = $request->get('branch', '');
-        $dateFrom = $request->get('date_from', '');
-        $dateTo = $request->get('date_to', '');
-        $search = $request->get('search', '');
-        
-        $transactions = $this->getTransactionReportData($category, $hub, $branch, $dateFrom, $dateTo, $search);
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
+        }
+
+        try {
+            $category = $request->get('category', '');
+            $hub = $request->get('hub', '');
+            $branch = $request->get('branch', '');
+            $dateFrom = $request->get('date_from', '');
+            $dateTo = $request->get('date_to', '');
+            $search = $request->get('search', '');
+            
+            $transactions = $this->getTransactionReportData($category, $hub, $branch, $dateFrom, $dateTo, $search);
         
         $export = new class($transactions) implements FromArray, WithHeadings {
             protected $transactions;
@@ -5706,14 +7020,20 @@ class AdminController extends Controller
                     'Admin Name',
                 ];
             }
-        };
-        
-        $filename = 'transaction_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            };
+            
+            $filename = 'transaction_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting transaction report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
         }
-        
-        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function networkReport(Request $request)
@@ -5783,14 +7103,28 @@ class AdminController extends Controller
     {
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $search = $request->query('search');
 
         $services = $this->normalizeReportTimestamps($this->getServices(), 'services');
         $services = $this->filterCollectionByDate($services, $dateFrom, $dateTo);
+
+        // Apply search filter
+        if ($search) {
+            $searchLower = strtolower($search);
+            $services = array_filter($services, function($service) use ($searchLower) {
+                return strpos(strtolower($service['name'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($service['network'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($service['status'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($service['remark'] ?? ''), $searchLower) !== false;
+            });
+            $services = array_values($services);
+        }
 
         return view('admin.reports.service', [
             'services' => $services,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'search' => $search,
         ]);
     }
 
@@ -5798,118 +7132,324 @@ class AdminController extends Controller
     {
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $search = $request->query('search');
 
         $countries = $this->normalizeReportTimestamps($this->getCountries(), 'countries');
         $countries = $this->filterCollectionByDate($countries, $dateFrom, $dateTo);
+
+        // Apply search filter
+        if ($search) {
+            $searchLower = strtolower($search);
+            $countries = array_filter($countries, function($country) use ($searchLower) {
+                return strpos(strtolower($country['name'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($country['code'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($country['isd_no'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($country['dialing_code'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($country['status'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($country['remark'] ?? ''), $searchLower) !== false;
+            });
+            $countries = array_values($countries);
+        }
 
         return view('admin.reports.country', [
             'countries' => $countries,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'search' => $search,
         ]);
+    }
+
+    /**
+     * Check if XMLWriter extension is available
+     */
+    private function checkXmlWriterExtension()
+    {
+        if (!extension_loaded('xmlwriter')) {
+            return redirect()->back()->with('error', 'XMLWriter PHP extension is not installed on the server. Please contact your server administrator to enable the xmlwriter extension.');
+        }
+        return null;
+    }
+
+    /**
+     * Export data as CSV when XMLWriter is not available
+     */
+    private function exportAsCsv(array $data, array $headings, string $filename)
+    {
+        $filename = str_ends_with($filename, '.csv') ? $filename : "{$filename}.csv";
+        
+        return response()->streamDownload(function () use ($headings, $data) {
+            $handle = fopen('php://output', 'w');
+            
+            // Add UTF-8 BOM for Excel compatibility
+            fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+            
+            // Write headings
+            fputcsv($handle, $headings);
+            
+            // Write data rows
+            foreach ($data as $row) {
+                fputcsv($handle, $row);
+            }
+            
+            fclose($handle);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        ]);
+    }
+
+    /**
+     * Safe Excel download with CSV fallback
+     */
+    private function safeExcelDownload($export, string $filename, array $csvData = null, array $csvHeadings = null)
+    {
+        // Check if XMLWriter is available
+        if (!extension_loaded('xmlwriter')) {
+            // Use CSV fallback if data is provided
+            if ($csvData !== null && $csvHeadings !== null) {
+                return $this->exportAsCsv($csvData, $csvHeadings, $filename);
+            }
+            // Otherwise try to extract data from export object
+            try {
+                if (method_exists($export, 'array') && method_exists($export, 'headings')) {
+                    $data = $export->array();
+                    $headings = $export->headings();
+                    return $this->exportAsCsv($data, $headings, $filename);
+                }
+            } catch (\Exception $e) {
+                \Log::error('Failed to extract data for CSV fallback: ' . $e->getMessage());
+            }
+            return redirect()->back()->with('error', 'XMLWriter PHP extension is not installed. CSV export data not available. Please contact your server administrator to enable the xmlwriter extension.');
+        }
+        
+        // Try Excel export
+        try {
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Excel export failed: ' . $e->getMessage());
+            // Fallback to CSV if available
+            if ($csvData !== null && $csvHeadings !== null) {
+                return $this->exportAsCsv($csvData, $csvHeadings, $filename);
+            }
+            // Try to extract from export object
+            try {
+                if (method_exists($export, 'array') && method_exists($export, 'headings')) {
+                    $data = $export->array();
+                    $headings = $export->headings();
+                    return $this->exportAsCsv($data, $headings, $filename);
+                }
+            } catch (\Exception $csvError) {
+                \Log::error('CSV fallback failed: ' . $csvError->getMessage());
+            }
+            throw $e; // Re-throw original exception
+        }
     }
 
     // Excel Export Methods
     public function exportZoneReport(Request $request)
     {
-        $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
+        try {
+            // Check for XMLWriter extension - if not available, use CSV fallback
+            $useCsv = !extension_loaded('xmlwriter');
+            $dateFrom = $request->query('date_from');
+            $dateTo = $request->query('date_to');
+            $search = $request->query('search');
 
-        $zones = $this->normalizeReportTimestamps($this->getZones(), 'zones');
-        $zones = $this->filterCollectionByDate($zones, $dateFrom, $dateTo);
-        
-        $export = new class($zones) implements FromArray, WithHeadings {
-            protected $zones;
-            
-            public function __construct($zones)
-            {
-                $this->zones = $zones;
+            $zones = $this->normalizeReportTimestamps($this->getZones(), 'zones');
+            $zones = $this->filterCollectionByDate($zones, $dateFrom, $dateTo);
+
+            // Apply search filter if provided
+            if ($search) {
+                $searchLower = strtolower($search);
+                $zones = array_filter($zones, function($zone) use ($searchLower) {
+                    return strpos(strtolower($zone['pincode'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($zone['country'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($zone['zone'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($zone['network'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($zone['service'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($zone['status'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($zone['remark'] ?? ''), $searchLower) !== false;
+                });
+                $zones = array_values($zones);
             }
             
-            public function array(): array
-            {
-                $data = [];
-                foreach ($this->zones as $zone) {
-                    $data[] = [
-                        $zone['id'],
-                        $zone['pincode'],
-                        $zone['country'],
-                        $zone['zone'],
-                        $zone['network'],
-                        $zone['service'],
-                        $zone['status'],
-                        $zone['remark'] ?? '-',
-                    ];
+            $export = new class($zones) implements FromArray, WithHeadings {
+                protected $zones;
+                
+                public function __construct($zones)
+                {
+                    $this->zones = $zones;
                 }
-                return $data;
+                
+                public function array(): array
+                {
+                    $data = [];
+                    foreach ($this->zones as $zone) {
+                        $data[] = [
+                            $zone['id'],
+                            $zone['pincode'],
+                            $zone['country'],
+                            $zone['zone'],
+                            $zone['network'],
+                            $zone['service'],
+                            $zone['status'],
+                            $zone['remark'] ?? '-',
+                        ];
+                    }
+                    return $data;
+                }
+                
+                public function headings(): array
+                {
+                    return ['ID', 'Pincode', 'Country', 'Zone', 'Network', 'Service', 'Status', 'Remark'];
+                }
+            };
+            
+            $filename = 'zone_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
             }
             
-            public function headings(): array
-            {
-                return ['ID', 'Pincode', 'Country', 'Zone', 'Network', 'Service', 'Status', 'Remark'];
+            // Prepare CSV data for fallback
+            $csvHeadings = ['ID', 'Pincode', 'Country', 'Zone', 'Network', 'Service', 'Status', 'Remark'];
+            $csvData = [];
+            foreach ($zones as $zone) {
+                $csvData[] = [
+                    $zone['id'],
+                    $zone['pincode'],
+                    $zone['country'],
+                    $zone['zone'],
+                    $zone['network'],
+                    $zone['service'],
+                    $zone['status'],
+                    $zone['remark'] ?? '-',
+                ];
             }
-        };
-        
-        $filename = 'zone_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            
+            // Use safe download with CSV fallback
+            return $this->safeExcelDownload($export, $filename, $csvData, $csvHeadings);
+        } catch (\Exception $e) {
+            \Log::error('Error exporting zone report: ' . $e->getMessage());
+            // Try CSV fallback on error if we have zones data
+            if (isset($zones) && is_array($zones) && !empty($zones)) {
+                try {
+                    $headings = ['ID', 'Pincode', 'Country', 'Zone', 'Network', 'Service', 'Status', 'Remark'];
+                    $csvData = [];
+                    foreach ($zones as $zone) {
+                        $csvData[] = [
+                            $zone['id'] ?? '',
+                            $zone['pincode'] ?? '',
+                            $zone['country'] ?? '',
+                            $zone['zone'] ?? '',
+                            $zone['network'] ?? '',
+                            $zone['service'] ?? '',
+                            $zone['status'] ?? '',
+                            $zone['remark'] ?? '-',
+                        ];
+                    }
+                    return $this->exportAsCsv($csvData, $headings, 'zone_report_' . date('Y-m-d') . '.csv');
+                } catch (\Exception $csvError) {
+                    \Log::error('CSV fallback also failed: ' . $csvError->getMessage());
+                }
+            }
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
         }
-        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function exportFormulaReport(Request $request)
     {
-        $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
-
-        $formulas = $this->normalizeReportTimestamps($this->getFormulas(), 'formulas');
-        $formulas = $this->filterCollectionByDate($formulas, $dateFrom, $dateTo);
-        
-        $export = new class($formulas) implements FromArray, WithHeadings {
-            protected $formulas;
-            
-            public function __construct($formulas)
-            {
-                $this->formulas = $formulas;
-            }
-            
-            public function array(): array
-            {
-                $data = [];
-                foreach ($this->formulas as $formula) {
-                    $data[] = [
-                        $formula['id'],
-                        $formula['formula_name'],
-                        $formula['network'],
-                        $formula['service'],
-                        $formula['type'],
-                        $formula['scope'],
-                        $formula['priority'],
-                        $formula['value'],
-                        $formula['status'],
-                        $formula['remark'] ?? '-',
-                    ];
-                }
-                return $data;
-            }
-            
-            public function headings(): array
-            {
-                return ['ID', 'Formula Name', 'Network', 'Service', 'Type', 'Scope', 'Priority', 'Value', 'Status', 'Remark'];
-            }
-        };
-        
-        $filename = 'formula_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
         }
-        return Excel::download($export, $filename . '.xlsx');
+
+        try {
+            $dateFrom = $request->query('date_from');
+            $dateTo = $request->query('date_to');
+            $search = $request->query('search');
+
+            $formulas = $this->normalizeReportTimestamps($this->getFormulas(), 'formulas');
+            $formulas = $this->filterCollectionByDate($formulas, $dateFrom, $dateTo);
+
+            // Apply search filter if provided
+            if ($search) {
+                $searchLower = strtolower($search);
+                $formulas = array_filter($formulas, function($formula) use ($searchLower) {
+                    return strpos(strtolower($formula['formula_name'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($formula['network'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($formula['service'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($formula['type'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($formula['scope'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($formula['status'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($formula['remark'] ?? ''), $searchLower) !== false;
+                });
+                $formulas = array_values($formulas);
+            }
+            
+            $export = new class($formulas) implements FromArray, WithHeadings {
+                protected $formulas;
+                
+                public function __construct($formulas)
+                {
+                    $this->formulas = $formulas;
+                }
+                
+                public function array(): array
+                {
+                    $data = [];
+                    foreach ($this->formulas as $formula) {
+                        $data[] = [
+                            $formula['id'],
+                            $formula['formula_name'],
+                            $formula['network'],
+                            $formula['service'],
+                            $formula['type'],
+                            $formula['scope'],
+                            $formula['priority'],
+                            $formula['value'],
+                            $formula['status'],
+                            $formula['remark'] ?? '-',
+                        ];
+                    }
+                    return $data;
+                }
+                
+                public function headings(): array
+                {
+                    return ['ID', 'Formula Name', 'Network', 'Service', 'Type', 'Scope', 'Priority', 'Value', 'Status', 'Remark'];
+                }
+            };
+        
+            $filename = 'formula_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting formula report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
+        }
     }
 
     public function exportShippingChargesReport(Request $request)
     {
-        $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
+        }
+
+        try {
+            $dateFrom = $request->query('date_from');
+            $dateTo = $request->query('date_to');
+            $search = $request->query('search');
 
         $shippingCharges = $this->normalizeReportTimestamps($this->getShippingCharges(), 'shipping_charges');
         $shippingCharges = $this->filterCollectionByDate($shippingCharges, $dateFrom, $dateTo);
@@ -5950,79 +7490,93 @@ class AdminController extends Controller
             }
         };
         
-        $filename = 'shipping_charges_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            $filename = 'shipping_charges_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting shipping charges report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
         }
-        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function exportBookingReport(Request $request)
     {
-        // Get filter parameters (same as bookingReport method)
-        $category = $request->get('category', '');
-        $hub = $request->get('hub', '');
-        $branch = $request->get('branch', '');
-        $dateFrom = $request->get('date_from', '');
-        $dateTo = $request->get('date_to', '');
-        $search = $request->get('search', '');
-        
-        // Get all bookings
-        $bookings = $this->getBookings();
-        $directEntryBookings = $this->getDirectEntryBookings();
-        
-        // Combine bookings
-        $allBookings = array_merge($bookings, $directEntryBookings);
-        
-        // Apply filters (same logic as bookingReport method)
-        if ($hub) {
-            $allBookings = array_filter($allBookings, function($booking) use ($hub) {
-                return isset($booking['hub']) && $booking['hub'] === $hub;
-            });
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
         }
-        
-        if ($branch) {
-            $allBookings = array_filter($allBookings, function($booking) use ($branch) {
-                return isset($booking['branch']) && $booking['branch'] === $branch;
-            });
-        }
-        
-        if ($dateFrom) {
-            $allBookings = array_filter($allBookings, function($booking) use ($dateFrom) {
-                $bookingDate = $booking['current_booking_date'] ?? $booking['date_of_sale'] ?? '';
-                return $bookingDate >= $dateFrom;
-            });
-        }
-        
-        if ($dateTo) {
-            $allBookings = array_filter($allBookings, function($booking) use ($dateTo) {
-                $bookingDate = $booking['current_booking_date'] ?? $booking['date_of_sale'] ?? '';
-                return $bookingDate <= $dateTo;
-            });
-        }
-        
-        if ($search) {
-            $allBookings = array_filter($allBookings, function($booking) use ($search) {
-                return stripos($booking['awb_no'] ?? '', $search) !== false 
-                    || stripos($booking['origin'] ?? '', $search) !== false
-                    || stripos($booking['destination'] ?? '', $search) !== false
-                    || stripos($booking['admin_name'] ?? 'System', $search) !== false;
-            });
-        }
-        
-        // Separate bookings back
-        $filteredBookings = [];
-        $filteredDirectEntry = [];
-        
-        foreach ($allBookings as $booking) {
-            if (isset($booking['is_direct_entry']) && $booking['is_direct_entry']) {
-                $filteredDirectEntry[] = $booking;
-            } else {
-                $filteredBookings[] = $booking;
+
+        try {
+            // Get filter parameters (same as bookingReport method)
+            $category = $request->get('category', '');
+            $hub = $request->get('hub', '');
+            $branch = $request->get('branch', '');
+            $dateFrom = $request->get('date_from', '');
+            $dateTo = $request->get('date_to', '');
+            $search = $request->get('search', '');
+            
+            // Get all bookings
+            $bookings = $this->getBookings();
+            $directEntryBookings = $this->getDirectEntryBookings();
+            
+            // Combine bookings
+            $allBookings = array_merge($bookings, $directEntryBookings);
+            
+            // Apply filters (same logic as bookingReport method)
+            if ($hub) {
+                $allBookings = array_filter($allBookings, function($booking) use ($hub) {
+                    return isset($booking['hub']) && $booking['hub'] === $hub;
+                });
             }
-        }
-        
-        $export = new class($filteredBookings, $filteredDirectEntry) implements FromArray, WithHeadings {
+            
+            if ($branch) {
+                $allBookings = array_filter($allBookings, function($booking) use ($branch) {
+                    return isset($booking['branch']) && $booking['branch'] === $branch;
+                });
+            }
+            
+            if ($dateFrom) {
+                $allBookings = array_filter($allBookings, function($booking) use ($dateFrom) {
+                    $bookingDate = $booking['current_booking_date'] ?? $booking['date_of_sale'] ?? '';
+                    return $bookingDate >= $dateFrom;
+                });
+            }
+            
+            if ($dateTo) {
+                $allBookings = array_filter($allBookings, function($booking) use ($dateTo) {
+                    $bookingDate = $booking['current_booking_date'] ?? $booking['date_of_sale'] ?? '';
+                    return $bookingDate <= $dateTo;
+                });
+            }
+            
+            if ($search) {
+                $allBookings = array_filter($allBookings, function($booking) use ($search) {
+                    return stripos($booking['awb_no'] ?? '', $search) !== false 
+                        || stripos($booking['origin'] ?? '', $search) !== false
+                        || stripos($booking['destination'] ?? '', $search) !== false
+                        || stripos($booking['admin_name'] ?? 'System', $search) !== false;
+                });
+            }
+            
+            // Separate bookings back
+            $filteredBookings = [];
+            $filteredDirectEntry = [];
+            
+            foreach ($allBookings as $booking) {
+                if (isset($booking['is_direct_entry']) && $booking['is_direct_entry']) {
+                    $filteredDirectEntry[] = $booking;
+                } else {
+                    $filteredBookings[] = $booking;
+                }
+            }
+            
+            $export = new class($filteredBookings, $filteredDirectEntry) implements FromArray, WithHeadings {
             protected $bookings;
             protected $directEntryBookings;
             
@@ -6079,103 +7633,144 @@ class AdminController extends Controller
             {
                 return ['ID', 'Booking Date', 'AWB No.', 'Shipment Type', 'Origin', 'Destination', 'Chr Weight', 'Pieces', 'Network', 'Service', 'Booking Amount', 'Type'];
             }
-        };
-        
-        $filename = 'booking_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            };
+            
+            $filename = 'booking_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($hub) {
+                $filename .= '_hub_' . str_replace(' ', '_', $hub);
+            }
+            if ($branch) {
+                $filename .= '_branch_' . str_replace(' ', '_', $branch);
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting booking report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
         }
-        if ($hub) {
-            $filename .= '_hub_' . str_replace(' ', '_', $hub);
-        }
-        if ($branch) {
-            $filename .= '_branch_' . str_replace(' ', '_', $branch);
-        }
-        
-        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function exportPaymentReport(Request $request)
     {
-        $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
-
-        $payments = $this->normalizeReportTimestamps(session('payments', []), null, 'payment_date');
-        $payments = $this->filterCollectionByDate($payments, $dateFrom, $dateTo, 'payment_date');
-
-        $export = new class($payments) implements FromArray, WithHeadings {
-            protected $payments;
-            
-            public function __construct($payments)
-            {
-                $this->payments = $payments;
-            }
-            
-            public function array(): array
-            {
-                $data = [];
-                foreach ($this->payments as $payment) {
-                    $data[] = [
-                        $payment['id'] ?? '-',
-                        $payment['payment_date'] ?? ($payment['created_at'] ?? '-'),
-                        $payment['payment_method'] ?? '-',
-                        $payment['amount'] ?? '0',
-                        $payment['status'] ?? '-',
-                        $payment['reference'] ?? '-',
-                    ];
-                }
-                return $data;
-            }
-            
-            public function headings(): array
-            {
-                return ['ID', 'Payment Date', 'Payment Method', 'Amount', 'Status', 'Reference'];
-            }
-        };
-        
-        $filename = 'payment_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
         }
-        return Excel::download($export, $filename . '.xlsx');
+
+        try {
+            $dateFrom = $request->query('date_from');
+            $dateTo = $request->query('date_to');
+            $search = $request->query('search');
+
+            $payments = $this->normalizeReportTimestamps(session('payments', []), null, 'payment_date');
+            $payments = $this->filterCollectionByDate($payments, $dateFrom, $dateTo, 'payment_date');
+
+            // Apply search filter if provided
+            if ($search) {
+                $searchLower = strtolower($search);
+                $payments = array_filter($payments, function($payment) use ($searchLower) {
+                    return strpos(strtolower($payment['payment_method'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($payment['status'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($payment['reference'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($payment['payment_date'] ?? ''), $searchLower) !== false;
+                });
+                $payments = array_values($payments);
+            }
+
+            $export = new class($payments) implements FromArray, WithHeadings {
+                protected $payments;
+                
+                public function __construct($payments)
+                {
+                    $this->payments = $payments;
+                }
+                
+                public function array(): array
+                {
+                    $data = [];
+                    foreach ($this->payments as $payment) {
+                        $data[] = [
+                            $payment['id'] ?? '-',
+                            $payment['payment_date'] ?? ($payment['created_at'] ?? '-'),
+                            $payment['payment_method'] ?? '-',
+                            $payment['amount'] ?? '0',
+                            $payment['status'] ?? '-',
+                            $payment['reference'] ?? '-',
+                        ];
+                    }
+                    return $data;
+                }
+                
+                public function headings(): array
+                {
+                    return ['ID', 'Payment Date', 'Payment Method', 'Amount', 'Status', 'Reference'];
+                }
+            };
+            
+            $filename = 'payment_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting payment report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
+        }
     }
 
     public function exportNetworkReport(Request $request)
     {
-        // Get filter parameters
-        $networkFilter = $request->get('network', '');
-        $dateFrom = $request->get('date_from', '');
-        $dateTo = $request->get('date_to', '');
-        
-        // Get networks with financial data (same logic as networkReport)
-        $networks = $this->getNetworks();
-        
-        // Apply network filter if provided
-        if (!empty($networkFilter)) {
-            $networks = array_filter($networks, function($network) use ($networkFilter) {
-                return isset($network['name']) && $network['name'] === $networkFilter;
-            });
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
         }
-        
-        // Calculate financial data
-        $networkFinancials = $this->calculateNetworkFinancials($networkFilter, $dateFrom, $dateTo);
-        
-        // Add financial data to networks
-        $networksWithFinancials = [];
-        foreach ($networks as $network) {
-            $networkName = $network['name'] ?? 'Unknown';
-            $network['financial'] = $networkFinancials[$networkName] ?? [
-                'spending' => 0,
-                'credit' => 0,
-                'debit' => 0,
-                'total_balance' => 0,
-                'opening_balance' => $network['opening_balance'] ?? 0,
-            ];
-            $networksWithFinancials[] = $network;
-        }
-        
-        $export = new class($networksWithFinancials) implements FromArray, WithHeadings {
-            protected $networks;
+
+        try {
+            // Get filter parameters
+            $networkFilter = $request->get('network', '');
+            $dateFrom = $request->get('date_from', '');
+            $dateTo = $request->get('date_to', '');
+            $search = $request->get('search', '');
+            
+            // Get networks with financial data (same logic as networkReport)
+            $networks = $this->getNetworks();
+            
+            // Apply network filter if provided
+            if (!empty($networkFilter)) {
+                $networks = array_filter($networks, function($network) use ($networkFilter) {
+                    return isset($network['name']) && $network['name'] === $networkFilter;
+                });
+            }
+            
+            // Calculate financial data
+            $networkFinancials = $this->calculateNetworkFinancials($networkFilter, $dateFrom, $dateTo);
+            
+            // Add financial data to networks
+            $networksWithFinancials = [];
+            foreach ($networks as $network) {
+                $networkName = $network['name'] ?? 'Unknown';
+                $network['financial'] = $networkFinancials[$networkName] ?? [
+                    'spending' => 0,
+                    'credit' => 0,
+                    'debit' => 0,
+                    'total_balance' => 0,
+                    'opening_balance' => $network['opening_balance'] ?? 0,
+                ];
+                $networksWithFinancials[] = $network;
+            }
+            
+            $export = new class($networksWithFinancials) implements FromArray, WithHeadings {
+                protected $networks;
             
             public function __construct($networks)
             {
@@ -6222,74 +7817,129 @@ class AdminController extends Controller
                     'Remark'
                 ];
             }
-        };
-        
-        $filename = 'network_report_' . date('Y-m-d');
-        if (!empty($networkFilter)) {
-            $filename .= '_' . str_replace(' ', '_', $networkFilter);
+            };
+            
+            $filename = 'network_report_' . date('Y-m-d');
+            if (!empty($networkFilter)) {
+                $filename .= '_' . str_replace(' ', '_', $networkFilter);
+            }
+            if (!empty($dateFrom) || !empty($dateTo)) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting network report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
         }
-        if (!empty($dateFrom) || !empty($dateTo)) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
-        }
-        
-        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function exportServiceReport(Request $request)
     {
-        $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
-
-        $services = $this->normalizeReportTimestamps($this->getServices(), 'services');
-        $services = $this->filterCollectionByDate($services, $dateFrom, $dateTo);
-        
-        $export = new class($services) implements FromArray, WithHeadings {
-            protected $services;
-            
-            public function __construct($services)
-            {
-                $this->services = $services;
-            }
-            
-            public function array(): array
-            {
-                $data = [];
-                foreach ($this->services as $service) {
-                    $data[] = [
-                        $service['id'],
-                        $service['name'],
-                        $service['network'],
-                        $service['transit_time'],
-                        $service['items_allowed'],
-                        $service['status'],
-                        $service['remark'] ?? '-',
-                    ];
-                }
-                return $data;
-            }
-            
-            public function headings(): array
-            {
-                return ['ID', 'Name', 'Network', 'Transit Time', 'Items Allowed', 'Status', 'Remark'];
-            }
-        };
-        
-        $filename = 'service_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
         }
-        return Excel::download($export, $filename . '.xlsx');
+
+        try {
+            $dateFrom = $request->query('date_from');
+            $dateTo = $request->query('date_to');
+            $search = $request->query('search');
+
+            $services = $this->normalizeReportTimestamps($this->getServices(), 'services');
+            $services = $this->filterCollectionByDate($services, $dateFrom, $dateTo);
+
+            // Apply search filter if provided
+            if ($search) {
+                $searchLower = strtolower($search);
+                $services = array_filter($services, function($service) use ($searchLower) {
+                    return strpos(strtolower($service['name'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($service['network'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($service['status'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($service['remark'] ?? ''), $searchLower) !== false;
+                });
+                $services = array_values($services);
+            }
+            
+            $export = new class($services) implements FromArray, WithHeadings {
+                protected $services;
+                
+                public function __construct($services)
+                {
+                    $this->services = $services;
+                }
+                
+                public function array(): array
+                {
+                    $data = [];
+                    foreach ($this->services as $service) {
+                        $data[] = [
+                            $service['id'],
+                            $service['name'],
+                            $service['network'],
+                            $service['transit_time'],
+                            $service['items_allowed'],
+                            $service['status'],
+                            $service['remark'] ?? '-',
+                        ];
+                    }
+                    return $data;
+                }
+                
+                public function headings(): array
+                {
+                    return ['ID', 'Name', 'Network', 'Transit Time', 'Items Allowed', 'Status', 'Remark'];
+                }
+            };
+            
+            $filename = 'service_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting service report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
+        }
     }
 
     public function exportCountryReport(Request $request)
     {
-        $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
+        }
 
-        $countries = $this->normalizeReportTimestamps($this->getCountries(), 'countries');
-        $countries = $this->filterCollectionByDate($countries, $dateFrom, $dateTo);
-        
-        $export = new class($countries) implements FromArray, WithHeadings {
+        try {
+            $dateFrom = $request->query('date_from');
+            $dateTo = $request->query('date_to');
+            $search = $request->query('search');
+
+            $countries = $this->normalizeReportTimestamps($this->getCountries(), 'countries');
+            $countries = $this->filterCollectionByDate($countries, $dateFrom, $dateTo);
+
+            // Apply search filter if provided
+            if ($search) {
+                $searchLower = strtolower($search);
+                $countries = array_filter($countries, function($country) use ($searchLower) {
+                    return strpos(strtolower($country['name'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($country['code'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($country['isd_no'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($country['dialing_code'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($country['status'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($country['remark'] ?? ''), $searchLower) !== false;
+                });
+                $countries = array_values($countries);
+            }
+            
+            $export = new class($countries) implements FromArray, WithHeadings {
             protected $countries;
             
             public function __construct($countries)
@@ -6318,35 +7968,120 @@ class AdminController extends Controller
             {
                 return ['ID', 'Name', 'Code', 'ISD No.', 'Dialing Code', 'Status', 'Remark'];
             }
-        };
-        
-        $filename = 'country_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            };
+            
+            $filename = 'country_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting country report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
         }
-        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function exportBankReport(Request $request)
     {
-        $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
+        }
 
-        $banks = $this->normalizeReportTimestamps($this->getBanks(), 'banks');
-        $banks = $this->filterCollectionByDate($banks, $dateFrom, $dateTo);
+        try {
+            $dateFrom = $request->query('date_from');
+            $dateTo = $request->query('date_to');
+            $category = $request->query('category');
+            $networkName = $request->query('network');
+            $search = $request->query('search');
+            $bankId = $request->query('bank');
 
-        $export = new class($banks) implements FromArray, WithHeadings {
-            protected $banks;
+            // Get bank reports (same logic as bankReport method)
+            $allBanks = $this->normalizeReportTimestamps($this->getBanks(), 'banks');
+            $allPayments = $this->getPaymentsIntoBank();
+            
+            $bankReports = [];
+            foreach ($allBanks as $bank) {
+            $bankAccountIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+            
+            $bankPayments = collect($allPayments)->filter(function($payment) use ($bankAccountIdentifier, $dateFrom, $dateTo, $category) {
+                $match = ($payment['bank_account'] ?? '') == $bankAccountIdentifier;
+                
+                if ($match && ($dateFrom || $dateTo)) {
+                    $paymentDate = $payment['created_at'] ?? '';
+                    if ($paymentDate) {
+                        try {
+                            $paymentDateObj = \Carbon\Carbon::parse($paymentDate);
+                            if ($dateFrom && $paymentDateObj->lt(\Carbon\Carbon::parse($dateFrom)->startOfDay())) {
+                                $match = false;
+                            }
+                            if ($dateTo && $paymentDateObj->gt(\Carbon\Carbon::parse($dateTo)->endOfDay())) {
+                                $match = false;
+                            }
+                        } catch (\Exception $e) {}
+                    }
+                }
+                
+                if ($match && $category) {
+                    $match = ($payment['category_bank'] ?? '') == $category;
+                }
+                
+                return $match;
+            })->values()->all();
+            
+            if ($bankId && $bank['id'] != $bankId) {
+                continue;
+            }
+            
+            $totalCredits = collect($bankPayments)->where('type', 'Credit')->sum('amount');
+            $totalDebits = collect($bankPayments)->where('type', 'Debit')->sum('amount');
+            
+            $salaryCredits = collect($bankPayments)->where('type', 'Credit')->where('category_bank', 'Salary')->sum('amount');
+            $salaryDebits = collect($bankPayments)->where('type', 'Debit')->where('category_bank', 'Salary')->sum('amount');
+            
+            $expenseCredits = collect($bankPayments)->where('type', 'Credit')->where('category_bank', 'Expense')->sum('amount');
+            $expenseDebits = collect($bankPayments)->where('type', 'Debit')->where('category_bank', 'Expense')->sum('amount');
+            
+            $revenueCredits = collect($bankPayments)->where('type', 'Credit')->where('category_bank', 'Revenue')->sum('amount');
+            $revenueDebits = collect($bankPayments)->where('type', 'Debit')->where('category_bank', 'Revenue')->sum('amount');
+            
+            $currentBalance = ($bank['opening_balance'] ?? 0) + $totalCredits - $totalDebits;
+            
+            $bankReports[] = [
+                'bank' => $bank,
+                'total_credits' => $totalCredits,
+                'total_debits' => $totalDebits,
+                'current_balance' => $currentBalance,
+                'salary_credits' => $salaryCredits,
+                'salary_debits' => $salaryDebits,
+                'salary_total' => $salaryCredits - $salaryDebits,
+                'expense_credits' => $expenseCredits,
+                'expense_debits' => $expenseDebits,
+                'expense_total' => $expenseCredits - $expenseDebits,
+                'revenue_credits' => $revenueCredits,
+                'revenue_debits' => $revenueDebits,
+                'revenue_total' => $revenueCredits - $revenueDebits,
+                'transactions' => $bankPayments,
+            ];
+        }
 
-            public function __construct($banks)
+        $export = new class($bankReports) implements FromArray, WithHeadings {
+            protected $bankReports;
+
+            public function __construct($bankReports)
             {
-                $this->banks = $banks;
+                $this->bankReports = $bankReports;
             }
 
             public function array(): array
             {
                 $data = [];
-                foreach ($this->banks as $bank) {
+                foreach ($this->bankReports as $report) {
+                    $bank = $report['bank'];
                     $data[] = [
                         $bank['id'] ?? '',
                         $bank['bank_name'] ?? '',
@@ -6354,7 +8089,19 @@ class AdminController extends Controller
                         $bank['account_number'] ?? '',
                         $bank['ifsc_code'] ?? '',
                         $bank['opening_balance'] ?? 0,
-                        $bank['created_at'] ?? '',
+                        $report['total_credits'] ?? 0,
+                        $report['total_debits'] ?? 0,
+                        $report['current_balance'] ?? 0,
+                        $report['salary_credits'] ?? 0,
+                        $report['salary_debits'] ?? 0,
+                        $report['salary_total'] ?? 0,
+                        $report['expense_credits'] ?? 0,
+                        $report['expense_debits'] ?? 0,
+                        $report['expense_total'] ?? 0,
+                        $report['revenue_credits'] ?? 0,
+                        $report['revenue_debits'] ?? 0,
+                        $report['revenue_total'] ?? 0,
+                        count($report['transactions'] ?? []),
                     ];
                 }
                 return $data;
@@ -6362,26 +8109,64 @@ class AdminController extends Controller
 
             public function headings(): array
             {
-                return ['ID', 'Bank Name', 'Account Holder', 'Account Number', 'IFSC Code', 'Opening Balance', 'Created At'];
+                return [
+                    'ID', 'Bank Name', 'Account Holder', 'Account Number', 'IFSC Code', 
+                    'Opening Balance', 'Total Credits', 'Total Debits', 'Current Balance',
+                    'Salary Credits', 'Salary Debits', 'Salary Total',
+                    'Expense Credits', 'Expense Debits', 'Expense Total',
+                    'Revenue Credits', 'Revenue Debits', 'Revenue Total',
+                    'Total Transactions'
+                ];
             }
-        };
+            };
 
-        $filename = 'bank_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            $filename = 'bank_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($category) {
+                $filename .= '_' . strtolower($category);
+            }
+            if ($networkName) {
+                $filename .= '_' . str_replace(' ', '_', strtolower($networkName));
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting bank report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
         }
-        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function exportWalletReport(Request $request)
     {
-        $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
+        }
 
-        $wallets = $this->normalizeReportTimestamps(session('wallets', []), 'wallets');
-        $wallets = $this->filterCollectionByDate($wallets, $dateFrom, $dateTo);
+        try {
+            $dateFrom = $request->query('date_from');
+            $dateTo = $request->query('date_to');
+            $search = $request->query('search');
 
-        $export = new class($wallets) implements FromArray, WithHeadings {
+            $wallets = $this->normalizeReportTimestamps(session('wallets', []), 'wallets');
+            $wallets = $this->filterCollectionByDate($wallets, $dateFrom, $dateTo);
+
+            // Apply search filter if provided
+            if ($search) {
+                $searchLower = strtolower($search);
+                $wallets = array_filter($wallets, function($wallet) use ($searchLower) {
+                    return strpos(strtolower($wallet['wallet_name'] ?? ''), $searchLower) !== false
+                        || strpos(strtolower($wallet['status'] ?? ''), $searchLower) !== false;
+                });
+                $wallets = array_values($wallets);
+            }
+
+            $export = new class($wallets) implements FromArray, WithHeadings {
             protected $wallets;
 
             public function __construct($wallets)
@@ -6409,27 +8194,183 @@ class AdminController extends Controller
             {
                 return ['ID', 'Wallet Name', 'Balance', 'Status', 'Last Transaction', 'Created At'];
             }
-        };
+            };
 
-        $filename = 'wallet_report_' . date('Y-m-d');
-        if ($dateFrom || $dateTo) {
-            $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            $filename = 'wallet_report_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            }
+            if ($search) {
+                $filename .= '_search_' . substr($search, 0, 10);
+            }
+            return Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting wallet report: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
         }
-        return Excel::download($export, $filename . '.xlsx');
     }
 
     public function bankReport(Request $request)
     {
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $category = $request->query('category'); // Salary, Expense, Revenue
+        $networkName = $request->query('network'); // Network name filter
+        $bankId = $request->query('bank'); // Specific bank filter
+        $search = $request->query('search'); // Search filter
 
-        $banks = $this->normalizeReportTimestamps($this->getBanks(), 'banks');
-        $banks = $this->filterCollectionByDate($banks, $dateFrom, $dateTo);
+        // Get all banks
+        $allBanks = $this->normalizeReportTimestamps($this->getBanks(), 'banks');
+        if (!is_array($allBanks)) {
+            $allBanks = [];
+        }
+        
+        // Get all payments into bank
+        $allPayments = $this->getPaymentsIntoBank();
+        if (!is_array($allPayments)) {
+            $allPayments = [];
+        }
+        
+        // Get all networks
+        $allNetworks = $this->getNetworks();
+        if (!is_array($allNetworks)) {
+            $allNetworks = [];
+        }
+        
+        // Build bank reports with transactions
+        $bankReports = [];
+        
+        foreach ($allBanks as $bank) {
+            $bankAccountIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+            
+            // Filter payments for this bank
+            $bankPayments = collect($allPayments)->filter(function($payment) use ($bankAccountIdentifier, $dateFrom, $dateTo, $category) {
+                $match = ($payment['bank_account'] ?? '') == $bankAccountIdentifier;
+                
+                // Date filter
+                if ($match && ($dateFrom || $dateTo)) {
+                    $paymentDate = $payment['created_at'] ?? '';
+                    if ($paymentDate) {
+                        try {
+                            $paymentDateObj = \Carbon\Carbon::parse($paymentDate);
+                            if ($dateFrom && $paymentDateObj->lt(\Carbon\Carbon::parse($dateFrom)->startOfDay())) {
+                                $match = false;
+                            }
+                            if ($dateTo && $paymentDateObj->gt(\Carbon\Carbon::parse($dateTo)->endOfDay())) {
+                                $match = false;
+                            }
+                        } catch (\Exception $e) {
+                            // Skip date comparison if parsing fails
+                        }
+                    }
+                }
+                
+                // Category filter
+                if ($match && $category) {
+                    $match = ($payment['category_bank'] ?? '') == $category;
+                }
+                
+                return $match;
+            })->values()->all();
+            
+            // Calculate totals by category
+            $totalCredits = collect($bankPayments)->where('type', 'Credit')->sum('amount');
+            $totalDebits = collect($bankPayments)->where('type', 'Debit')->sum('amount');
+            
+            $salaryCredits = collect($bankPayments)->where('type', 'Credit')->where('category_bank', 'Salary')->sum('amount');
+            $salaryDebits = collect($bankPayments)->where('type', 'Debit')->where('category_bank', 'Salary')->sum('amount');
+            
+            $expenseCredits = collect($bankPayments)->where('type', 'Credit')->where('category_bank', 'Expense')->sum('amount');
+            $expenseDebits = collect($bankPayments)->where('type', 'Debit')->where('category_bank', 'Expense')->sum('amount');
+            
+            $revenueCredits = collect($bankPayments)->where('type', 'Credit')->where('category_bank', 'Revenue')->sum('amount');
+            $revenueDebits = collect($bankPayments)->where('type', 'Debit')->where('category_bank', 'Revenue')->sum('amount');
+            
+            // Get network-related transactions if network filter is applied
+            $networkTransactions = [];
+            if ($networkName) {
+                $networkPayments = collect($bankPayments)->filter(function($payment) use ($networkName) {
+                    // Check if payment remark or description mentions the network
+                    $remark = strtolower($payment['remark'] ?? '');
+                    return strpos($remark, strtolower($networkName)) !== false;
+                })->values()->all();
+                
+                $networkTransactions = $networkPayments;
+            }
+            
+            $currentBalance = ($bank['opening_balance'] ?? 0) + $totalCredits - $totalDebits;
+            
+            // Apply bank filter if specified
+            if ($bankId && $bank['id'] != $bankId) {
+                continue;
+            }
+            
+            // Always add bank to reports, even if no transactions (for report completeness)
+            $bankReports[] = [
+                'bank' => $bank,
+                'total_transactions' => count($bankPayments),
+                'total_credits' => $totalCredits,
+                'total_debits' => $totalDebits,
+                'current_balance' => $currentBalance,
+                'salary_credits' => $salaryCredits,
+                'salary_debits' => $salaryDebits,
+                'salary_total' => $salaryCredits - $salaryDebits,
+                'expense_credits' => $expenseCredits,
+                'expense_debits' => $expenseDebits,
+                'expense_total' => $expenseCredits - $expenseDebits,
+                'revenue_credits' => $revenueCredits,
+                'revenue_debits' => $revenueDebits,
+                'revenue_total' => $revenueCredits - $revenueDebits,
+                'transactions' => $networkName ? $networkTransactions : $bankPayments,
+            ];
+        }
+        
+        // Filter by network if specified (affects which banks to show)
+        if ($networkName) {
+            $bankReports = array_filter($bankReports, function($report) {
+                return count($report['transactions'] ?? []) > 0;
+            });
+            $bankReports = array_values($bankReports); // Re-index array
+        }
+
+        // Apply search filter
+        if ($search) {
+            $searchLower = strtolower($search);
+            $bankReports = array_filter($bankReports, function($report) use ($searchLower) {
+                $bank = $report['bank'] ?? [];
+                return strpos(strtolower($bank['bank_name'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($bank['account_holder_name'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($bank['account_number'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($bank['ifsc_code'] ?? ''), $searchLower) !== false;
+            });
+            $bankReports = array_values($bankReports);
+        }
+
+        // Ensure allBanks is an array
+        if (!is_array($allBanks)) {
+            $allBanks = [];
+        }
+
+        // Ensure allNetworks is an array
+        if (!is_array($allNetworks)) {
+            $allNetworks = [];
+        }
+
+        // Ensure bankReports is an array
+        if (!is_array($bankReports)) {
+            $bankReports = [];
+        }
 
         return view('admin.reports.bank', [
-            'banks' => $banks,
+            'bankReports' => $bankReports,
+            'allBanks' => $allBanks,
+            'allNetworks' => $allNetworks,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'category' => $category,
+            'networkName' => $networkName,
+            'bankId' => $bankId,
+            'search' => $search,
         ]);
     }
 
@@ -6437,14 +8378,27 @@ class AdminController extends Controller
     {
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
+        $search = $request->query('search');
 
         $wallets = $this->normalizeReportTimestamps(session('wallets', []), 'wallets');
         $wallets = $this->filterCollectionByDate($wallets, $dateFrom, $dateTo);
+
+        // Apply search filter
+        if ($search) {
+            $searchLower = strtolower($search);
+            $wallets = array_filter($wallets, function($wallet) use ($searchLower) {
+                return strpos(strtolower($wallet['wallet_name'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($wallet['status'] ?? ''), $searchLower) !== false
+                    || strpos(strtolower($wallet['last_transaction'] ?? ''), $searchLower) !== false;
+            });
+            $wallets = array_values($wallets);
+        }
 
         return view('admin.reports.wallet', [
             'wallets' => $wallets,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'search' => $search,
         ]);
     }
 
@@ -6506,6 +8460,25 @@ class AdminController extends Controller
     // Banks Management
     private function getBanks()
     {
+        // Try to get from database first
+        $dbBanks = \App\Models\Bank::orderBy('bank_name', 'asc')->get();
+        
+        if ($dbBanks->isNotEmpty()) {
+            // Convert to array format for backward compatibility
+            return $dbBanks->map(function($bank) {
+                return [
+                    'id' => $bank->id,
+                    'bank_name' => $bank->bank_name,
+                    'account_holder_name' => $bank->account_holder_name,
+                    'account_number' => $bank->account_number,
+                    'ifsc_code' => $bank->ifsc_code,
+                    'opening_balance' => $bank->opening_balance,
+                    'created_at' => $bank->created_at ? $bank->created_at->toDateTimeString() : now()->toDateTimeString(),
+                ];
+            })->toArray();
+        }
+        
+        // Fallback to session if database is empty
         if (session()->has('banks')) {
             return session('banks');
         }
@@ -6546,11 +8519,68 @@ class AdminController extends Controller
         ]);
     }
 
-    public function allBanks()
+    public function allBanks(Request $request)
     {
         $banks = $this->getBanks();
+        
+        // Apply search filter
+        if ($request->filled('search')) {
+            $searchTerm = strtolower($request->search);
+            $banks = array_filter($banks, function($bank) use ($searchTerm) {
+                return strpos(strtolower($bank['bank_name'] ?? ''), $searchTerm) !== false
+                    || strpos(strtolower($bank['account_holder_name'] ?? ''), $searchTerm) !== false
+                    || strpos(strtolower($bank['account_number'] ?? ''), $searchTerm) !== false
+                    || strpos(strtolower($bank['ifsc_code'] ?? ''), $searchTerm) !== false;
+            });
+            $banks = array_values($banks);
+        }
+        
         return view('admin.banks.all', [
             'banks' => $banks,
+            'searchParams' => [
+                'search' => $request->search ?? '',
+            ],
+        ]);
+    }
+
+    public function viewBank($id)
+    {
+        $banks = $this->getBanks();
+        $bank = collect($banks)->firstWhere('id', $id);
+        
+        if (!$bank) {
+            return redirect()->route('admin.banks.all')->with('error', 'Bank not found');
+        }
+
+        // Get all payments into bank
+        $allPayments = $this->getPaymentsIntoBank();
+        
+        // Build bank account identifier: "bank_name - account_number"
+        $bankAccountIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+        
+        // Filter payments for this bank
+        $bankPayments = collect($allPayments)->filter(function($payment) use ($bankAccountIdentifier) {
+            return ($payment['bank_account'] ?? '') == $bankAccountIdentifier;
+        })->values()->all();
+        
+        // Calculate totals
+        $totalCredits = collect($bankPayments)->where('type', 'Credit')->sum('amount');
+        $totalDebits = collect($bankPayments)->where('type', 'Debit')->sum('amount');
+        $currentBalance = ($bank['opening_balance'] ?? 0) + $totalCredits - $totalDebits;
+        
+        // Separate credit and debit transactions
+        $creditTransactions = collect($bankPayments)->where('type', 'Credit')->sortByDesc('created_at')->values()->all();
+        $debitTransactions = collect($bankPayments)->where('type', 'Debit')->sortByDesc('created_at')->values()->all();
+
+        return view('admin.banks.view', [
+            'bank' => $bank,
+            'creditTransactions' => $creditTransactions,
+            'debitTransactions' => $debitTransactions,
+            'totalCredits' => $totalCredits,
+            'totalDebits' => $totalDebits,
+            'openingBalance' => $bank['opening_balance'] ?? 0,
+            'currentBalance' => $currentBalance,
+            'totalTransactions' => count($bankPayments),
         ]);
     }
 
@@ -6579,26 +8609,38 @@ class AdminController extends Controller
             'opening_balance' => 'required|numeric|min:0',
         ]);
 
-        $banks = $this->getBanks();
-        if (!is_array($banks)) {
-            $banks = [];
+        // Save to database
+        try {
+            \App\Models\Bank::create([
+                'bank_name' => $request->bank_name,
+                'account_holder_name' => $request->account_holder_name,
+                'account_number' => $request->account_number,
+                'ifsc_code' => $request->ifsc_code,
+                'opening_balance' => (float) $request->opening_balance,
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $banks = $this->getBanks();
+            if (!is_array($banks)) {
+                $banks = [];
+            }
+            
+            $newId = count($banks) > 0 ? max(array_column($banks, 'id')) + 1 : 1;
+            
+            $newBank = [
+                'id' => $newId,
+                'bank_name' => $request->bank_name,
+                'account_holder_name' => $request->account_holder_name,
+                'account_number' => $request->account_number,
+                'ifsc_code' => $request->ifsc_code,
+                'opening_balance' => (float) $request->opening_balance,
+                'created_at' => now()->toDateTimeString(),
+            ];
+            
+            $banks[] = $newBank;
+            session(['banks' => $banks]);
+            session()->save();
         }
-        
-        $newId = count($banks) > 0 ? max(array_column($banks, 'id')) + 1 : 1;
-        
-        $newBank = [
-            'id' => $newId,
-            'bank_name' => $request->bank_name,
-            'account_holder_name' => $request->account_holder_name,
-            'account_number' => $request->account_number,
-            'ifsc_code' => $request->ifsc_code,
-            'opening_balance' => (float) $request->opening_balance,
-            'created_at' => now()->toDateTimeString(),
-        ];
-        
-        $banks[] = $newBank;
-        session(['banks' => $banks]);
-        session()->save();
 
         return redirect()->route('admin.banks.all')->with('success', 'Bank created successfully!');
     }
@@ -6613,45 +8655,64 @@ class AdminController extends Controller
             'opening_balance' => 'required|numeric|min:0',
         ]);
 
-        $banks = $this->getBanks();
-        if (!is_array($banks)) {
-            $banks = [];
-        }
-        
-        $banks = array_map(function($bank) use ($id, $request) {
-            if ($bank['id'] == $id) {
-                return [
-                    'id' => $id,
-                    'bank_name' => $request->bank_name,
-                    'account_holder_name' => $request->account_holder_name,
-                    'account_number' => $request->account_number,
-                    'ifsc_code' => $request->ifsc_code,
-                    'opening_balance' => (float) $request->opening_balance,
-                    'created_at' => $bank['created_at'] ?? now()->toDateTimeString(),
-                ];
+        // Try to update in database first
+        try {
+            $bank = \App\Models\Bank::findOrFail($id);
+            $bank->update([
+                'bank_name' => $request->bank_name,
+                'account_holder_name' => $request->account_holder_name,
+                'account_number' => $request->account_number,
+                'ifsc_code' => $request->ifsc_code,
+                'opening_balance' => (float) $request->opening_balance,
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $banks = $this->getBanks();
+            if (!is_array($banks)) {
+                $banks = [];
             }
-            return $bank;
-        }, $banks);
-        
-        session(['banks' => array_values($banks)]);
-        session()->save();
+            
+            $banks = array_map(function($bank) use ($id, $request) {
+                if ($bank['id'] == $id) {
+                    return [
+                        'id' => $id,
+                        'bank_name' => $request->bank_name,
+                        'account_holder_name' => $request->account_holder_name,
+                        'account_number' => $request->account_number,
+                        'ifsc_code' => $request->ifsc_code,
+                        'opening_balance' => (float) $request->opening_balance,
+                        'created_at' => $bank['created_at'] ?? now()->toDateTimeString(),
+                    ];
+                }
+                return $bank;
+            }, $banks);
+            
+            session(['banks' => array_values($banks)]);
+            session()->save();
+        }
 
         return redirect()->route('admin.banks.all')->with('success', 'Bank updated successfully!');
     }
 
     public function deleteBank($id)
     {
-        $banks = $this->getBanks();
-        if (!is_array($banks)) {
-            $banks = [];
+        // Try to delete from database first
+        try {
+            \App\Models\Bank::findOrFail($id)->delete();
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $banks = $this->getBanks();
+            if (!is_array($banks)) {
+                $banks = [];
+            }
+            
+            $banks = array_filter($banks, function($bank) use ($id) {
+                return $bank['id'] != $id;
+            });
+            
+            session(['banks' => array_values($banks)]);
+            session()->save();
         }
-        
-        $banks = array_filter($banks, function($bank) use ($id) {
-            return $bank['id'] != $id;
-        });
-        
-        session(['banks' => array_values($banks)]);
-        session()->save();
 
         return redirect()->route('admin.banks.all')->with('success', 'Bank deleted successfully!');
     }
@@ -6697,9 +8758,321 @@ class AdminController extends Controller
             ->with('success', "Successfully deleted {$deletedCount} bank(s).");
     }
 
+    // Bank Transfer Management
+    public function bankTransfer()
+    {
+        $banks = $this->getBanks();
+        $payments = $this->getPaymentsIntoBank();
+        return view('admin.banks.transfer', [
+            'banks' => $banks,
+            'payments' => $payments,
+        ]);
+    }
+
+    public function storeBankTransfer(Request $request)
+    {
+        $request->validate([
+            'from_bank' => 'required|string|max:255',
+            'to_bank' => 'required|string|max:255',
+            'amount' => 'required|numeric|min:0.01',
+            'transaction_no' => 'required|string|max:255',
+            'remark' => 'nullable|string',
+        ]);
+
+        // Check if from and to banks are different
+        if ($request->from_bank === $request->to_bank) {
+            return redirect()->back()->withInput()->with('error', 'Source and destination banks must be different.');
+        }
+
+        // Get all banks to check if they exist
+        $banks = $this->getBanks();
+        $fromBank = collect($banks)->firstWhere(function($bank) use ($request) {
+            $bankIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+            return $bankIdentifier === $request->from_bank;
+        });
+
+        $toBank = collect($banks)->firstWhere(function($bank) use ($request) {
+            $bankIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+            return $bankIdentifier === $request->to_bank;
+        });
+
+        if (!$fromBank) {
+            return redirect()->back()->withInput()->with('error', 'Source bank not found.');
+        }
+
+        if (!$toBank) {
+            return redirect()->back()->withInput()->with('error', 'Destination bank not found.');
+        }
+
+        // Get all payments to calculate current balance
+        $allPayments = $this->getPaymentsIntoBank();
+        if (!is_array($allPayments)) {
+            $allPayments = [];
+        }
+
+        // Calculate current balance for source bank
+        $fromBankPayments = collect($allPayments)->filter(function($payment) use ($request) {
+            return ($payment['bank_account'] ?? '') === $request->from_bank;
+        });
+
+        $fromBankCredits = $fromBankPayments->where('type', 'Credit')->sum('amount');
+        $fromBankDebits = $fromBankPayments->where('type', 'Debit')->sum('amount');
+        $fromBankBalance = ($fromBank['opening_balance'] ?? 0) + $fromBankCredits - $fromBankDebits;
+
+        // Check if source bank has sufficient balance
+        if ($fromBankBalance < $request->amount) {
+            return redirect()->back()->withInput()->with('error', 'Insufficient balance in source bank. Available balance: ₹' . number_format($fromBankBalance, 2));
+        }
+
+        // Get next ID for payments
+        $nextId = count($allPayments) > 0 ? max(array_column($allPayments, 'id')) + 1 : 1;
+
+        // Create debit transaction for source bank
+        $debitPayment = [
+            'id' => $nextId,
+            'bank_account' => $request->from_bank,
+            'mode_of_payment' => 'Netf', // NEFT/RTGS/IMPS
+            'type' => 'Debit',
+            'category_bank' => 'Expense',
+            'transaction_no' => $request->transaction_no,
+            'amount' => $request->amount,
+            'remark' => 'Transfer to ' . $request->to_bank . ($request->remark ? ' - ' . $request->remark : ''),
+            'created_at' => now()->toDateTimeString(),
+        ];
+
+        // Create credit transaction for destination bank
+        $creditPayment = [
+            'id' => $nextId + 1,
+            'bank_account' => $request->to_bank,
+            'mode_of_payment' => 'Netf', // NEFT/RTGS/IMPS
+            'type' => 'Credit',
+            'category_bank' => 'Revenue',
+            'transaction_no' => $request->transaction_no,
+            'amount' => $request->amount,
+            'remark' => 'Transfer from ' . $request->from_bank . ($request->remark ? ' - ' . $request->remark : ''),
+            'created_at' => now()->toDateTimeString(),
+        ];
+
+        // Save to database
+        try {
+            \App\Models\PaymentIntoBank::create([
+                'bank_account' => $request->from_bank,
+                'mode_of_payment' => 'Netf',
+                'type' => 'Debit',
+                'category_bank' => 'Expense',
+                'transaction_no' => $request->transaction_no,
+                'amount' => $request->amount,
+                'remark' => 'Transfer to ' . $request->to_bank . ($request->remark ? ' - ' . $request->remark : ''),
+            ]);
+
+            \App\Models\PaymentIntoBank::create([
+                'bank_account' => $request->to_bank,
+                'mode_of_payment' => 'Netf',
+                'type' => 'Credit',
+                'category_bank' => 'Revenue',
+                'transaction_no' => $request->transaction_no,
+                'amount' => $request->amount,
+                'remark' => 'Transfer from ' . $request->from_bank . ($request->remark ? ' - ' . $request->remark : ''),
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $allPayments[] = $debitPayment;
+            $allPayments[] = $creditPayment;
+            session(['payments_into_bank' => $allPayments]);
+            session()->save();
+        }
+
+        return redirect()->route('admin.banks.transfer')->with('success', 'Bank transfer completed successfully! Amount ₹' . number_format($request->amount, 2) . ' transferred from ' . $request->from_bank . ' to ' . $request->to_bank);
+    }
+
+    public function allBankTransfers(Request $request)
+    {
+        $allPayments = $this->getPaymentsIntoBank();
+        if (!is_array($allPayments)) {
+            $allPayments = [];
+        }
+
+        // Filter only transfer transactions (those with "Transfer" in remark)
+        $transfers = collect($allPayments)->filter(function($payment) {
+            $remark = strtolower($payment['remark'] ?? '');
+            return strpos($remark, 'transfer') !== false;
+        })->values()->all();
+
+        // Group transfers by transaction number (debit and credit pairs)
+        $groupedTransfers = [];
+        $processedIds = [];
+
+        foreach ($transfers as $transfer) {
+            if (in_array($transfer['id'], $processedIds)) {
+                continue;
+            }
+
+            $transactionNo = $transfer['transaction_no'] ?? '';
+            $relatedTransfer = collect($transfers)->first(function($t) use ($transactionNo, $transfer) {
+                return ($t['transaction_no'] ?? '') === $transactionNo 
+                    && $t['id'] != $transfer['id']
+                    && $t['type'] != $transfer['type'];
+            });
+
+            if ($relatedTransfer) {
+                $groupedTransfers[] = [
+                    'id' => $transfer['id'],
+                    'transaction_no' => $transactionNo,
+                    'from_bank' => $transfer['type'] === 'Debit' ? $transfer['bank_account'] : $relatedTransfer['bank_account'],
+                    'to_bank' => $transfer['type'] === 'Credit' ? $transfer['bank_account'] : $relatedTransfer['bank_account'],
+                    'amount' => $transfer['amount'],
+                    'remark' => $transfer['remark'] ?? '',
+                    'created_at' => $transfer['created_at'] ?? now()->toDateTimeString(),
+                    'debit_id' => $transfer['type'] === 'Debit' ? $transfer['id'] : $relatedTransfer['id'],
+                    'credit_id' => $transfer['type'] === 'Credit' ? $transfer['id'] : $relatedTransfer['id'],
+                ];
+                $processedIds[] = $transfer['id'];
+                $processedIds[] = $relatedTransfer['id'];
+            }
+        }
+
+        // Sort by date descending
+        usort($groupedTransfers, function($a, $b) {
+            return strtotime($b['created_at']) - strtotime($a['created_at']);
+        });
+
+        // Apply search filter
+        if ($request->filled('search')) {
+            $searchTerm = strtolower($request->search);
+            $groupedTransfers = array_filter($groupedTransfers, function($transfer) use ($searchTerm) {
+                return strpos(strtolower($transfer['from_bank'] ?? ''), $searchTerm) !== false
+                    || strpos(strtolower($transfer['to_bank'] ?? ''), $searchTerm) !== false
+                    || strpos(strtolower($transfer['transaction_no'] ?? ''), $searchTerm) !== false;
+            });
+            $groupedTransfers = array_values($groupedTransfers);
+        }
+
+        return view('admin.banks.transfer-all', [
+            'transfers' => $groupedTransfers,
+            'searchParams' => [
+                'search' => $request->search ?? '',
+            ],
+        ]);
+    }
+
+    public function viewBankTransfer($id)
+    {
+        $allPayments = $this->getPaymentsIntoBank();
+        if (!is_array($allPayments)) {
+            $allPayments = [];
+        }
+
+        // Find the transfer transaction
+        $transfer = collect($allPayments)->firstWhere('id', $id);
+        
+        if (!$transfer) {
+            return redirect()->route('admin.banks.transfer.all')->with('error', 'Transfer not found.');
+        }
+
+        // Check if it's a transfer transaction
+        $remark = strtolower($transfer['remark'] ?? '');
+        if (strpos($remark, 'transfer') === false) {
+            return redirect()->route('admin.banks.transfer.all')->with('error', 'This is not a transfer transaction.');
+        }
+
+        // Find the related transaction (debit or credit pair)
+        $transactionNo = $transfer['transaction_no'] ?? '';
+        $relatedTransfer = collect($allPayments)->first(function($t) use ($transactionNo, $transfer) {
+            return ($t['transaction_no'] ?? '') === $transactionNo 
+                && $t['id'] != $transfer['id']
+                && $t['type'] != $transfer['type'];
+        });
+
+        if (!$relatedTransfer) {
+            return redirect()->route('admin.banks.transfer.all')->with('error', 'Related transfer transaction not found.');
+        }
+
+        // Determine which is debit and which is credit
+        $debitTransaction = $transfer['type'] === 'Debit' ? $transfer : $relatedTransfer;
+        $creditTransaction = $transfer['type'] === 'Credit' ? $transfer : $relatedTransfer;
+
+        // Get bank details
+        $banks = $this->getBanks();
+        $fromBank = collect($banks)->first(function($bank) use ($debitTransaction) {
+            $bankIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+            return $bankIdentifier === ($debitTransaction['bank_account'] ?? '');
+        });
+
+        $toBank = collect($banks)->first(function($bank) use ($creditTransaction) {
+            $bankIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+            return $bankIdentifier === ($creditTransaction['bank_account'] ?? '');
+        });
+
+        // Calculate balances at the time of transfer
+        $allPaymentsBefore = collect($allPayments)->filter(function($p) use ($transfer) {
+            $transferDate = $transfer['created_at'] ?? '';
+            $paymentDate = $p['created_at'] ?? '';
+            if (!$transferDate || !$paymentDate) {
+                return false;
+            }
+            return strtotime($paymentDate) < strtotime($transferDate);
+        });
+
+        // Calculate from bank balance before transfer
+        $fromBankPaymentsBefore = $allPaymentsBefore->filter(function($p) use ($debitTransaction) {
+            return ($p['bank_account'] ?? '') === ($debitTransaction['bank_account'] ?? '');
+        });
+        $fromBankCreditsBefore = $fromBankPaymentsBefore->where('type', 'Credit')->sum('amount');
+        $fromBankDebitsBefore = $fromBankPaymentsBefore->where('type', 'Debit')->sum('amount');
+        $fromBankBalanceBefore = ($fromBank['opening_balance'] ?? 0) + $fromBankCreditsBefore - $fromBankDebitsBefore;
+        $fromBankBalanceAfter = $fromBankBalanceBefore - ($debitTransaction['amount'] ?? 0);
+
+        // Calculate to bank balance before transfer
+        $toBankPaymentsBefore = $allPaymentsBefore->filter(function($p) use ($creditTransaction) {
+            return ($p['bank_account'] ?? '') === ($creditTransaction['bank_account'] ?? '');
+        });
+        $toBankCreditsBefore = $toBankPaymentsBefore->where('type', 'Credit')->sum('amount');
+        $toBankDebitsBefore = $toBankPaymentsBefore->where('type', 'Debit')->sum('amount');
+        $toBankBalanceBefore = ($toBank['opening_balance'] ?? 0) + $toBankCreditsBefore - $toBankDebitsBefore;
+        $toBankBalanceAfter = $toBankBalanceBefore + ($creditTransaction['amount'] ?? 0);
+
+        return view('admin.banks.transfer-view', [
+            'transfer' => [
+                'transaction_no' => $transactionNo,
+                'amount' => $transfer['amount'],
+                'remark' => $transfer['remark'] ?? '',
+                'created_at' => $transfer['created_at'] ?? now()->toDateTimeString(),
+            ],
+            'debitTransaction' => $debitTransaction,
+            'creditTransaction' => $creditTransaction,
+            'fromBank' => $fromBank,
+            'toBank' => $toBank,
+            'fromBankBalanceBefore' => $fromBankBalanceBefore,
+            'fromBankBalanceAfter' => $fromBankBalanceAfter,
+            'toBankBalanceBefore' => $toBankBalanceBefore,
+            'toBankBalanceAfter' => $toBankBalanceAfter,
+        ]);
+    }
+
     // Payments Into Bank Management
     private function getPaymentsIntoBank()
     {
+        // Try to get from database first
+        $dbPayments = \App\Models\PaymentIntoBank::orderBy('created_at', 'desc')->get();
+        
+        if ($dbPayments->isNotEmpty()) {
+            // Convert to array format for backward compatibility
+            return $dbPayments->map(function($payment) {
+                return [
+                    'id' => $payment->id,
+                    'bank_account' => $payment->bank_account,
+                    'mode_of_payment' => $payment->mode_of_payment,
+                    'type' => $payment->type,
+                    'category_bank' => $payment->category_bank,
+                    'transaction_no' => $payment->transaction_no,
+                    'amount' => $payment->amount,
+                    'remark' => $payment->remark,
+                    'created_at' => $payment->created_at ? $payment->created_at->toDateTimeString() : now()->toDateTimeString(),
+                ];
+            })->toArray();
+        }
+        
+        // Fallback to session if database is empty
         if (session()->has('payments_into_bank')) {
             return session('payments_into_bank');
         }
@@ -6722,13 +9095,58 @@ class AdminController extends Controller
         ]);
     }
 
-    public function allPaymentsIntoBank()
+    public function allPaymentsIntoBank(Request $request)
     {
         $payments = $this->getPaymentsIntoBank();
         $banks = $this->getBanks();
+        
+        // Apply search filter
+        if ($request->filled('search')) {
+            $searchTerm = strtolower($request->search);
+            $payments = array_filter($payments, function($payment) use ($searchTerm) {
+                return strpos(strtolower($payment['bank_account'] ?? ''), $searchTerm) !== false
+                    || strpos(strtolower($payment['transaction_no'] ?? ''), $searchTerm) !== false
+                    || strpos(strtolower($payment['category_bank'] ?? ''), $searchTerm) !== false
+                    || strpos(strtolower($payment['remark'] ?? ''), $searchTerm) !== false;
+            });
+        }
+        
+        // Apply bank filter
+        if ($request->filled('bank')) {
+            $bankFilter = $request->bank;
+            $payments = array_filter($payments, function($payment) use ($bankFilter) {
+                return ($payment['bank_account'] ?? '') == $bankFilter;
+            });
+        }
+        
+        // Apply mode filter
+        if ($request->filled('mode')) {
+            $modeFilter = $request->mode;
+            $payments = array_filter($payments, function($payment) use ($modeFilter) {
+                return ($payment['mode_of_payment'] ?? '') == $modeFilter;
+            });
+        }
+        
+        // Apply type filter
+        if ($request->filled('type')) {
+            $typeFilter = $request->type;
+            $payments = array_filter($payments, function($payment) use ($typeFilter) {
+                return ($payment['type'] ?? '') == $typeFilter;
+            });
+        }
+        
+        // Re-index array after filtering
+        $payments = array_values($payments);
+        
         return view('admin.payments-into-bank.all', [
             'payments' => $payments,
             'banks' => $banks,
+            'searchParams' => [
+                'search' => $request->search ?? '',
+                'bank' => $request->bank ?? '',
+                'mode' => $request->mode ?? '',
+                'type' => $request->type ?? '',
+            ],
         ]);
     }
 
@@ -6755,7 +9173,7 @@ class AdminController extends Controller
             'bank_account' => 'required|string|max:255',
             'mode_of_payment' => 'required|string|in:UPI,Cash,Netf',
             'type' => 'required|string|in:Credit,Debit',
-            'category_bank' => 'required|string|max:255',
+            'category_bank' => 'required|string|in:Salary,Expense,Revenue',
             'transaction_no' => 'required|string|max:255',
             'amount' => 'required|numeric|min:0',
             'remark' => 'required|string',
@@ -6780,9 +9198,23 @@ class AdminController extends Controller
             'created_at' => now()->toDateTimeString(),
         ];
         
-        $payments[] = $newPayment;
-        session(['payments_into_bank' => $payments]);
-        session()->save();
+        // Save to database
+        try {
+            \App\Models\PaymentIntoBank::create([
+                'bank_account' => $request->bank_account,
+                'mode_of_payment' => $request->mode_of_payment,
+                'type' => $request->type,
+                'category_bank' => $request->category_bank,
+                'transaction_no' => $request->transaction_no,
+                'amount' => $request->amount,
+                'remark' => $request->remark,
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $payments[] = $newPayment;
+            session(['payments_into_bank' => $payments]);
+            session()->save();
+        }
 
         return redirect()->route('admin.payments-into-bank.all')->with('success', 'Payment added successfully!');
     }
@@ -6793,7 +9225,7 @@ class AdminController extends Controller
             'bank_account' => 'required|string|max:255',
             'mode_of_payment' => 'required|string|in:UPI,Cash,Netf',
             'type' => 'required|string|in:Credit,Debit',
-            'category_bank' => 'required|string|max:255',
+            'category_bank' => 'required|string|in:Salary,Expense,Revenue',
             'transaction_no' => 'required|string|max:255',
             'amount' => 'required|numeric|min:0',
             'remark' => 'required|string',
@@ -6843,6 +9275,71 @@ class AdminController extends Controller
         session()->save();
 
         return redirect()->route('admin.payments-into-bank.all')->with('success', 'Payment deleted successfully!');
+    }
+
+    public function downloadPaymentsIntoBankTemplate()
+    {
+        $headers = [
+            'Bank Account',
+            'Mode of Payment',
+            'Type',
+            'Category Bank',
+            'Transaction No',
+            'Amount',
+            'Remark',
+        ];
+        
+        $exampleRow = [
+            'HDFC Bank - 1234567890',
+            'UPI',
+            'Credit',
+            'Salary',
+            'TXN123456789',
+            '10000.00',
+            'Monthly salary payment',
+        ];
+        
+        $data = [$headers, $exampleRow];
+        
+        $export = new class($data) implements \Maatwebsite\Excel\Concerns\FromArray, \Maatwebsite\Excel\Concerns\WithHeadings {
+            protected $data;
+            
+            public function __construct($data)
+            {
+                $this->data = $data;
+            }
+            
+            public function array(): array
+            {
+                return $this->data;
+            }
+            
+            public function headings(): array
+            {
+                return $this->data[0] ?? [];
+            }
+        };
+        
+        $filename = 'payments_into_bank_template_' . date('Y-m-d') . '.xlsx';
+        
+        return \Maatwebsite\Excel\Facades\Excel::download($export, $filename);
+    }
+
+    public function importPaymentsIntoBank(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|mimes:xlsx,xls,csv|max:10240', // Max 10MB
+        ]);
+
+        try {
+            \Maatwebsite\Excel\Facades\Excel::import(new \App\Imports\PaymentsIntoBankImport(), $request->file('file'));
+            
+            return redirect()->route('admin.payments-into-bank.all')
+                ->with('success', 'Payments imported successfully!');
+        } catch (\Exception $e) {
+            return redirect()->back()
+                ->with('error', 'Error importing payments: ' . $e->getMessage());
+        }
     }
 
     // Payments Management (Single & Bulk)
@@ -7138,6 +9635,60 @@ class AdminController extends Controller
         session()->save();
 
         return redirect()->route('admin.payments.wallet')->with('success', 'Wallet transaction added successfully!');
+    }
+
+    public function downloadWalletTransactionsTemplate()
+    {
+        $export = new class implements \Maatwebsite\Excel\Concerns\FromArray, \Maatwebsite\Excel\Concerns\WithHeadings {
+            public function array(): array
+            {
+                return [
+                    [
+                        'AWB Number' => 'AWB123456789',
+                        'Network' => 'DTDC',
+                        'Transaction Type' => 'Payment',
+                        'Mode' => 'UPI',
+                        'Type' => 'Credit',
+                        'Amount' => '1000.00',
+                        'Remark' => 'Payment for shipment',
+                    ],
+                ];
+            }
+            
+            public function headings(): array
+            {
+                return [
+                    'AWB Number',
+                    'Network',
+                    'Transaction Type',
+                    'Mode',
+                    'Type',
+                    'Amount',
+                    'Remark',
+                ];
+            }
+        };
+        
+        $filename = 'wallet_transactions_template_' . date('Y-m-d') . '.xlsx';
+        
+        return \Maatwebsite\Excel\Facades\Excel::download($export, $filename);
+    }
+
+    public function importWalletTransactions(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|mimes:xlsx,xls,csv|max:10240', // Max 10MB
+        ]);
+
+        try {
+            \Maatwebsite\Excel\Facades\Excel::import(new \App\Imports\WalletTransactionsImport(), $request->file('file'));
+            
+            return redirect()->route('admin.payments.wallet')
+                ->with('success', 'Wallet transactions imported successfully!');
+        } catch (\Exception $e) {
+            return redirect()->back()
+                ->with('error', 'Error importing wallet transactions: ' . $e->getMessage());
+        }
     }
 
     // Payment Gateways Management

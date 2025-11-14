@@ -161,6 +161,9 @@
         .loading-spinner.show {
             display: inline-block;
         }
+        #toggleBreakdownBtn svg {
+            transition: transform 0.3s ease;
+        }
     </style>
 
     <!-- Page Header -->
@@ -242,7 +245,15 @@
                         <select name="origin_country" id="origin_country" class="form-select" required>
                             <option value="">Select Origin Country</option>
                             @foreach($countries as $country)
-                                <option value="{{ $country }}">{{ $country }}</option>
+                                <option value="{{ $country['name'] }}">
+                                    {{ $country['name'] }} 
+                                    @if(!empty($country['isd_no']))
+                                        ({{ $country['isd_no'] }})
+                                    @endif
+                                    @if(!empty($country['code']))
+                                        - {{ $country['code'] }}
+                                    @endif
+                                </option>
                             @endforeach
                         </select>
                     </div>
@@ -272,7 +283,15 @@
                         <select name="destination_country" id="destination_country" class="form-select" required>
                             <option value="">Select Destination Country</option>
                             @foreach($countries as $country)
-                                <option value="{{ $country }}">{{ $country }}</option>
+                                <option value="{{ $country['name'] }}">
+                                    {{ $country['name'] }} 
+                                    @if(!empty($country['isd_no']))
+                                        ({{ $country['isd_no'] }})
+                                    @endif
+                                    @if(!empty($country['code']))
+                                        - {{ $country['code'] }}
+                                    @endif
+                                </option>
                             @endforeach
                         </select>
                     </div>
@@ -327,13 +346,29 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                             </svg>
                         </div>
-                        <p class="text-sm text-gray-600 font-medium mb-2">Estimated Shipping Rate</p>
-                        <div class="rate-amount" id="rateAmount">$0.00</div>
+                        <p class="text-sm text-gray-600 font-medium mb-2">Network and Service (Best Price)</p>
+                        <div class="rate-amount" id="rateAmountWithGST">₹0.00</div>
+                        <p class="text-xs text-gray-500 mt-1 mb-3">Total (Including GST)</p>
+                        <div class="text-xs text-gray-600 mt-3 mb-2" id="selectedNetworkService">
+                            <!-- Selected network/service will be populated here -->
+                        </div>
+                        <div class="text-xs text-gray-500" id="networkServiceList">
+                            <!-- Network/Service list will be populated here -->
+                        </div>
+                        <div class="text-xs text-gray-500 mt-2" id="rateDetails">
+                            <!-- Formula rate info will be populated here -->
+                        </div>
                     </div>
 
                     <div class="mt-6">
-                        <h3 class="text-lg font-bold text-gray-900 mb-4">Rate Breakdown</h3>
-                        <div id="rateBreakdown">
+                        <button type="button" id="toggleBreakdownBtn" class="w-full mb-4 px-4 py-2 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg text-sm font-semibold text-orange-700 flex items-center justify-center gap-2 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                            <span>View Detailed Breakdown</span>
+                        </button>
+                        
+                        <div id="rateBreakdown" style="display: none;">
                             <!-- Will be populated by JavaScript -->
                         </div>
                     </div>
@@ -411,19 +446,45 @@
     </div>
 
     <script>
-        // Pincode data
-        const pincodeData = @json($pincodes);
+        // API endpoint for fetching pincodes by country
+        const pincodeApiUrl = '{{ route("admin.api.pincodes-by-country") }}';
 
         // Update pincode options based on country selection
-        function updatePincodes(selectElement, country) {
-            const pincodes = pincodeData[country] || [];
-            selectElement.innerHTML = '<option value="">Select Pincode</option>';
-            pincodes.forEach(pincode => {
-                const option = document.createElement('option');
-                option.value = pincode;
-                option.textContent = pincode;
-                selectElement.appendChild(option);
-            });
+        async function updatePincodes(selectElement, country) {
+            if (!country) {
+                selectElement.innerHTML = '<option value="">Select Country First</option>';
+                return;
+            }
+
+            selectElement.innerHTML = '<option value="">Loading...</option>';
+            selectElement.disabled = true;
+
+            try {
+                const response = await fetch(`${pincodeApiUrl}?country=${encodeURIComponent(country)}`);
+                const result = await response.json();
+
+                if (result.success && result.data) {
+                    selectElement.innerHTML = '<option value="">Select Pincode</option>';
+                    result.data.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.pincode;
+                        // Show pincode with zones if available
+                        const zonesText = item.zones && item.zones.length > 0 
+                            ? ` (${item.zones.join(', ')})` 
+                            : '';
+                        option.textContent = item.pincode + zonesText;
+                        option.setAttribute('data-zones', JSON.stringify(item.zones || []));
+                        selectElement.appendChild(option);
+                    });
+                } else {
+                    selectElement.innerHTML = '<option value="">No pincodes found</option>';
+                }
+            } catch (error) {
+                console.error('Error fetching pincodes:', error);
+                selectElement.innerHTML = '<option value="">Error loading pincodes</option>';
+            } finally {
+                selectElement.disabled = false;
+            }
         }
 
         // Origin country change
@@ -447,6 +508,27 @@
                 }
             });
         });
+
+        // Toggle breakdown visibility (set up once, outside form submission)
+        let breakdownVisible = false;
+        const toggleBreakdownBtn = document.getElementById('toggleBreakdownBtn');
+        if (toggleBreakdownBtn) {
+            toggleBreakdownBtn.addEventListener('click', function() {
+                const rateBreakdown = document.getElementById('rateBreakdown');
+                if (rateBreakdown) {
+                    breakdownVisible = !breakdownVisible;
+                    if (breakdownVisible) {
+                        rateBreakdown.style.display = 'block';
+                        this.querySelector('span').textContent = 'Hide Detailed Breakdown';
+                        this.querySelector('svg').style.transform = 'rotate(180deg)';
+                    } else {
+                        rateBreakdown.style.display = 'none';
+                        this.querySelector('span').textContent = 'View Detailed Breakdown';
+                        this.querySelector('svg').style.transform = 'rotate(0deg)';
+                    }
+                }
+            });
+        }
 
         // Form submission
         document.getElementById('rateCalculatorForm').addEventListener('submit', async function(e) {
@@ -475,7 +557,7 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Update rate amount - use selected option's total if available, otherwise use main rate
+                    // Calculate rate with GST - use selected option's total if available, otherwise use main rate
                     let displayRate = data.rate;
                     if (data.all_network_service_options && data.all_network_service_options.length > 0) {
                         const selectedOption = data.all_network_service_options.find(function(opt) {
@@ -485,15 +567,100 @@
                             displayRate = selectedOption.total_rate;
                         }
                     }
-                    document.getElementById('rateAmount').textContent = '₹' + displayRate.toFixed(2);
+                    
+                    // Calculate GST (18%)
+                    const gstRate = 18;
+                    const gstAmount = (displayRate * gstRate) / 100;
+                    const totalWithGST = displayRate + gstAmount;
+                    
+                    // Update rate amount at top with GST included
+                    document.getElementById('rateAmountWithGST').textContent = '₹' + totalWithGST.toFixed(2);
+                    
+                    // Build selected network/service info
+                    let selectedNetworkHtml = '';
+                    const network = data.base_price_info.network || 'N/A';
+                    const service = data.base_price_info.service || 'N/A';
+                    
+                    if (network !== 'N/A' && service !== 'N/A') {
+                        selectedNetworkHtml = '<div class="inline-block px-3 py-1 bg-blue-50 border border-blue-200 rounded-lg">';
+                        selectedNetworkHtml += '<span class="font-semibold text-blue-700">Selected: ' + network + ' - ' + service + '</span>';
+                        selectedNetworkHtml += '</div>';
+                    }
+                    document.getElementById('selectedNetworkService').innerHTML = selectedNetworkHtml;
+                    
+                    // Build network/service list (all available options)
+                    let networkServiceListHtml = '';
+                    if (data.all_network_service_options && data.all_network_service_options.length > 0) {
+                        networkServiceListHtml = '<div class="mt-3 pt-3 border-t border-gray-200">';
+                        networkServiceListHtml += '<div class="text-xs font-semibold text-gray-600 mb-2">Available Options:</div>';
+                        data.all_network_service_options.forEach(function(option, index) {
+                            const isSelected = option.is_selected;
+                            const optionGST = (option.total_rate * gstRate) / 100;
+                            const optionTotalWithGST = option.total_rate + optionGST;
+                            
+                            networkServiceListHtml += '<div class="mb-2 p-2 rounded text-xs ' + (isSelected ? 'bg-blue-50 border border-blue-300' : 'bg-gray-50 border border-gray-200') + '">';
+                            networkServiceListHtml += '<div class="flex items-center justify-between mb-1">';
+                            networkServiceListHtml += '<span class="' + (isSelected ? 'font-semibold text-blue-700' : 'text-gray-700') + '">';
+                            networkServiceListHtml += option.network + ' - ' + option.service;
+                            if (isSelected) {
+                                networkServiceListHtml += ' <span class="text-green-600 text-xs">(Selected - Best Price)</span>';
+                            }
+                            networkServiceListHtml += '</span>';
+                            networkServiceListHtml += '<span class="' + (isSelected ? 'font-bold text-blue-900' : 'font-semibold text-gray-800') + '">₹' + optionTotalWithGST.toFixed(2) + '</span>';
+                            networkServiceListHtml += '</div>';
+                            if (!isSelected) {
+                                networkServiceListHtml += '<div class="text-gray-500 text-xs">Base: ₹' + option.base_rate.toFixed(2) + ' + Weight: ₹' + option.weight_charge.toFixed(2) + ' + Distance: ₹' + option.distance_charge.toFixed(2) + ' + GST: ₹' + optionGST.toFixed(2) + '</div>';
+                            }
+                            networkServiceListHtml += '</div>';
+                        });
+                        networkServiceListHtml += '</div>';
+                    }
+                    document.getElementById('networkServiceList').innerHTML = networkServiceListHtml;
+                    
+                    // Build formula rate info for brackets
+                    let rateDetailsHtml = '';
+                    if (data.applied_formulas && data.applied_formulas.length > 0) {
+                        const formulaRates = [];
+                        data.applied_formulas.forEach(function(formula) {
+                            const formulaType = formula.type || 'Fixed';
+                            const formulaScope = formula.scope || 'Flat';
+                            const formulaValue = formula.value || 0;
+                            
+                            let rateText = '';
+                            if (formulaType === 'Fixed') {
+                                if (formulaScope === 'per kg') {
+                                    rateText = '₹' + formulaValue.toFixed(2) + ' per kg';
+                                } else {
+                                    rateText = '₹' + formulaValue.toFixed(2) + ' flat';
+                                }
+                            } else { // Percentage
+                                if (formulaScope === 'per kg') {
+                                    rateText = formulaValue.toFixed(2) + '% per kg';
+                                } else {
+                                    rateText = formulaValue.toFixed(2) + '%';
+                                }
+                            }
+                            if (rateText) {
+                                formulaRates.push(rateText);
+                            }
+                        });
+                        
+                        if (formulaRates.length > 0) {
+                            rateDetailsHtml = '<div class="mt-2 text-gray-600">';
+                            rateDetailsHtml += '<span class="font-semibold">Formula:</span> ';
+                            rateDetailsHtml += '<span class="text-gray-500">' + formulaRates.join(', ') + '</span>';
+                            rateDetailsHtml += '</div>';
+                        }
+                    }
+                    document.getElementById('rateDetails').innerHTML = rateDetailsHtml;
                     
                     // Build breakdown HTML
                     let breakdownHtml = '';
                     
-                    // Base Rate with Network/Service info
+                    // Network and Services Rate with Network/Service info
                     breakdownHtml += '<div class="breakdown-item bg-blue-50 border-blue-200">';
                     breakdownHtml += '<div class="flex justify-between items-center mb-2">';
-                    breakdownHtml += '<span class="text-sm font-medium text-gray-700">Base Rate</span>';
+                    breakdownHtml += '<span class="text-sm font-medium text-gray-700">Network and Services Rate</span>';
                     breakdownHtml += '<span class="text-sm font-bold text-gray-900">₹' + data.breakdown.base_rate.toFixed(2) + '</span>';
                     breakdownHtml += '</div>';
                     breakdownHtml += '<div class="text-xs text-gray-600 mt-1 pt-2 border-t border-blue-200">';
@@ -586,10 +753,10 @@
                     breakdownHtml += '</div>';
                     breakdownHtml += '</div>';
                     
-                    // Weight Charge with Formula info
+                    // Formula with Formula info
                     breakdownHtml += '<div class="breakdown-item bg-green-50 border-green-200">';
                     breakdownHtml += '<div class="flex justify-between items-center mb-2">';
-                    breakdownHtml += '<span class="text-sm font-medium text-gray-700">Weight Charge</span>';
+                    breakdownHtml += '<span class="text-sm font-medium text-gray-700">Formula</span>';
                     breakdownHtml += '<span class="text-sm font-bold text-gray-900">₹' + data.breakdown.weight_charge.toFixed(2) + '</span>';
                     breakdownHtml += '</div>';
                     
@@ -663,6 +830,45 @@
                     breakdownHtml += '<span class="text-sm font-bold text-purple-700">Service Type</span>';
                     breakdownHtml += '<span class="text-sm font-bold text-purple-900">' + data.breakdown.service_type + '</span>';
                     breakdownHtml += '</div>';
+                    breakdownHtml += '</div>';
+                    
+                    // Add detailed breakdown with GST (use already calculated values)
+                    breakdownHtml += '<div class="breakdown-item bg-yellow-50 border-yellow-200 mt-4">';
+                    breakdownHtml += '<div class="font-semibold text-sm text-gray-900 mb-3">Detailed Breakdown</div>';
+                    
+                    // Subtotal (before GST) - use the displayRate already calculated
+                    breakdownHtml += '<div class="flex justify-between items-center mb-2 pb-2 border-b border-yellow-200">';
+                    breakdownHtml += '<span class="text-sm text-gray-700">Subtotal (Before GST)</span>';
+                    breakdownHtml += '<span class="text-sm font-bold text-gray-900">₹' + displayRate.toFixed(2) + '</span>';
+                    breakdownHtml += '</div>';
+                    
+                    // Formula breakdown
+                    if (data.applied_formulas && data.applied_formulas.length > 0) {
+                        breakdownHtml += '<div class="mb-2 pb-2 border-b border-yellow-200">';
+                        breakdownHtml += '<div class="text-xs font-semibold text-gray-700 mb-1">Formulas Applied:</div>';
+                        data.applied_formulas.forEach(function(formula, index) {
+                            const formulaName = formula.name || formula.formula_name || ('Formula ' + (index + 1));
+                            const calculatedCharge = formula.calculated_charge || 0;
+                            breakdownHtml += '<div class="flex justify-between items-center text-xs text-gray-600 mb-1">';
+                            breakdownHtml += '<span>' + formulaName + '</span>';
+                            breakdownHtml += '<span>₹' + calculatedCharge.toFixed(2) + '</span>';
+                            breakdownHtml += '</div>';
+                        });
+                        breakdownHtml += '</div>';
+                    }
+                    
+                    // GST 18% - use the already calculated gstAmount
+                    breakdownHtml += '<div class="flex justify-between items-center mb-2 pb-2 border-b border-yellow-200">';
+                    breakdownHtml += '<span class="text-sm text-gray-700">GST (18%)</span>';
+                    breakdownHtml += '<span class="text-sm font-bold text-gray-900">₹' + gstAmount.toFixed(2) + '</span>';
+                    breakdownHtml += '</div>';
+                    
+                    // Total (with GST) - use the already calculated totalWithGST
+                    breakdownHtml += '<div class="flex justify-between items-center pt-2">';
+                    breakdownHtml += '<span class="text-sm font-bold text-gray-900">Total (Including GST)</span>';
+                    breakdownHtml += '<span class="text-lg font-bold text-orange-600">₹' + totalWithGST.toFixed(2) + '</span>';
+                    breakdownHtml += '</div>';
+                    
                     breakdownHtml += '</div>';
                     
                     document.getElementById('rateBreakdown').innerHTML = breakdownHtml;

@@ -196,8 +196,8 @@
                             </svg>
                             AWB No. <span class="required">*</span>
                         </label>
-                        <input type="text" name="awb_no" id="awb_no" class="form-input" placeholder="AWB123456789" required pattern="[a-zA-Z0-9]+" title="No special characters allowed">
-                        <p class="text-xs text-gray-500 mt-1">No duplicate/Special characters allowed</p>
+                        <input type="text" name="awb_no" id="awb_no" class="form-input" placeholder="AWB123456789 or AWB-123_456" required>
+                        <p class="text-xs text-gray-500 mt-1">AWB No. must be unique (no duplicates). Special characters are allowed.</p>
                     </div>
 
                     <!-- Type & Origin -->
@@ -591,6 +591,39 @@
                         </div>
                     </div>
 
+                    <!-- Forward Number -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/>
+                            </svg>
+                            Forward Number
+                        </label>
+                        <input type="text" name="forwarding_number" id="forwarding_number" class="form-input" placeholder="Enter Forward Number">
+                    </div>
+
+                    <!-- Remark 1 -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
+                            </svg>
+                            Remark 1
+                        </label>
+                        <input type="text" name="remark_1" id="remark_1" class="form-input" placeholder="Remark 1">
+                    </div>
+
+                    <!-- Remark 2 -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
+                            </svg>
+                            Remark 2
+                        </label>
+                        <input type="text" name="remark_2" id="remark_2" class="form-input" placeholder="Remark 2">
+                    </div>
+
                     <!-- Remark 3 -->
                     <div class="form-group">
                         <label class="form-label">
@@ -647,7 +680,7 @@
                     </div>
                     <div class="flex items-start gap-2">
                         <div class="w-1.5 h-1.5 rounded-full bg-purple-600 mt-1.5 flex-shrink-0"></div>
-                        <span>No special characters allowed in AWB No.</span>
+                        <span>Special characters are allowed in AWB No. (e.g., hyphens, underscores)</span>
                     </div>
                     <div class="flex items-start gap-2">
                         <div class="w-1.5 h-1.5 rounded-full bg-purple-600 mt-1.5 flex-shrink-0"></div>

@@ -93,6 +93,7 @@
                 $exportParams = array_filter([
                     'date_from' => $dateFrom ?? request('date_from'),
                     'date_to' => $dateTo ?? request('date_to'),
+                    'search' => $search ?? request('search'),
                 ]);
             @endphp
             <div class="flex items-center gap-3">
@@ -123,6 +124,10 @@
         <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
             <form method="GET" action="{{ route('admin.reports.country') }}" class="flex flex-wrap items-end gap-3">
                 <div>
+                    <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Search</label>
+                    <input type="text" name="search" class="form-input" placeholder="Search by name, code, ISD, status..." value="{{ $search ?? request('search') }}">
+                </div>
+                <div>
                     <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">From</label>
                     <input type="date" name="date_from" class="form-input" value="{{ $dateFrom ?? request('date_from') }}">
                 </div>
@@ -134,7 +139,7 @@
                     <button type="submit" class="admin-btn-primary px-4 py-2 text-sm font-semibold">
                         Filter
                     </button>
-                    @if(($dateFrom ?? request('date_from')) || ($dateTo ?? request('date_to')))
+                    @if(($dateFrom ?? request('date_from')) || ($dateTo ?? request('date_to')) || ($search ?? request('search')))
                         <a href="{{ route('admin.reports.country') }}" class="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition">
                             Reset
                         </a>

@@ -47,6 +47,24 @@
             background: white;
             transition: all 0.3s ease;
         }
+        #awb_dropdown {
+            scrollbar-width: thin;
+            scrollbar-color: #FF750F #f3f4f6;
+        }
+        #awb_dropdown::-webkit-scrollbar {
+            width: 6px;
+        }
+        #awb_dropdown::-webkit-scrollbar-track {
+            background: #f3f4f6;
+            border-radius: 3px;
+        }
+        #awb_dropdown::-webkit-scrollbar-thumb {
+            background: #FF750F;
+            border-radius: 3px;
+        }
+        #awb_dropdown::-webkit-scrollbar-thumb:hover {
+            background: #e6690d;
+        }
         .form-input:focus, .form-select:focus, .form-textarea:focus {
             outline: none;
             border-color: #FF750F;
@@ -180,7 +198,7 @@
                         <p class="text-xs text-gray-500 mt-1">Automatically set to today's date</p>
                     </div>
 
-                    <!-- AWB No. (Dropdown) -->
+                    <!-- AWB No. (Searchable Dropdown) -->
                     <div class="form-group">
                         <label class="form-label">
                             <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -188,12 +206,44 @@
                             </svg>
                             AWB No. <span class="required">**</span>
                         </label>
-                        <select name="awb_no" id="awb_no" class="form-select" required>
-                            <option value="">Select AWB No.</option>
-                            @foreach($awbUploads as $awb)
-                                <option value="{{ $awb['awb_no'] }}">{{ $awb['awb_no'] }} - {{ $awb['destination'] }}</option>
-                            @endforeach
-                        </select>
+                        <div class="relative">
+                            <input 
+                                type="text" 
+                                id="awb_search" 
+                                class="form-input" 
+                                placeholder="Search AWB No. or Destination..." 
+                                autocomplete="off"
+                                style="padding-right: 40px;"
+                            >
+                            <svg class="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            <div id="awb_dropdown" class="absolute z-50 w-full mt-1 bg-white border-2 border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto hidden">
+                                <!-- Options will be populated here -->
+                            </div>
+                            <select name="awb_no" id="awb_no" class="hidden" required>
+                                <option value="">Select AWB No.</option>
+                                @foreach($awbUploads as $awb)
+                                    <option 
+                                        value="{{ $awb['awb_no'] }}" 
+                                        data-awb="{{ $awb['awb_no'] }}"
+                                        data-destination="{{ $awb['destination'] ?? '' }}"
+                                        data-origin="{{ $awb['origin'] ?? '' }}"
+                                        data-shipment-type="{{ $awb['shipment_type'] ?? '' }}"
+                                        data-booking-type="{{ $awb['booking_type'] ?? '' }}"
+                                        data-date-of-sale="{{ $awb['date_of_sale'] ?? '' }}"
+                                        data-consignee-name="{{ $awb['consignee_name'] ?? '' }}"
+                                        data-origin-pin="{{ $awb['origin_pin'] ?? '' }}"
+                                        data-destination-pin="{{ $awb['destination_pin'] ?? '' }}"
+                                        data-chr-weight="{{ $awb['chr_weight'] ?? '' }}"
+                                        data-pieces="{{ $awb['pieces'] ?? '' }}"
+                                        data-network="{{ $awb['network_name'] ?? '' }}"
+                                    >
+                                        {{ $awb['awb_no'] }} - {{ $awb['destination'] ?? 'N/A' }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        </div>
                     </div>
 
                     <!-- Shipment Type -->
@@ -294,7 +344,9 @@
                                 </svg>
                                 Origin Pin
                             </label>
-                            <input type="text" name="origin_pin" id="origin_pin" class="form-input" placeholder="e.g., 400001">
+                            <select name="origin_pin" id="origin_pin" class="form-select">
+                                <option value="">Select Origin Country First</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label class="form-label">
@@ -304,7 +356,9 @@
                                 </svg>
                                 Destination Pin <span class="required">*</span>
                             </label>
-                            <input type="text" name="destination_pin" id="destination_pin" class="form-input" placeholder="e.g., 10001" required>
+                            <select name="destination_pin" id="destination_pin" class="form-select" required>
+                                <option value="">Select Destination Country First</option>
+                            </select>
                         </div>
                     </div>
 
@@ -493,6 +547,57 @@
     </div>
 
     <script>
+        // API endpoint for fetching pincodes by country
+        const pincodeApiUrl = '{{ route("admin.api.pincodes-by-country") }}';
+
+        // Update pincode options based on country selection
+        async function updatePincodes(selectElement, country) {
+            if (!country) {
+                selectElement.innerHTML = '<option value="">Select Country First</option>';
+                return;
+            }
+
+            selectElement.innerHTML = '<option value="">Loading...</option>';
+            selectElement.disabled = true;
+
+            try {
+                const response = await fetch(`${pincodeApiUrl}?country=${encodeURIComponent(country)}`);
+                const result = await response.json();
+
+                if (result.success && result.data) {
+                    selectElement.innerHTML = '<option value="">Select Pincode</option>';
+                    result.data.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.pincode;
+                        // Show pincode with zones if available
+                        const zonesText = item.zones && item.zones.length > 0 
+                            ? ` (${item.zones.join(', ')})` 
+                            : '';
+                        option.textContent = item.pincode + zonesText;
+                        option.setAttribute('data-zones', JSON.stringify(item.zones || []));
+                        selectElement.appendChild(option);
+                    });
+                } else {
+                    selectElement.innerHTML = '<option value="">No pincodes found</option>';
+                }
+            } catch (error) {
+                console.error('Error fetching pincodes:', error);
+                selectElement.innerHTML = '<option value="">Error loading pincodes</option>';
+            } finally {
+                selectElement.disabled = false;
+            }
+        }
+
+        // Origin country change
+        document.getElementById('origin')?.addEventListener('change', function() {
+            updatePincodes(document.getElementById('origin_pin'), this.value);
+        });
+
+        // Destination country change
+        document.getElementById('destination')?.addEventListener('change', function() {
+            updatePincodes(document.getElementById('destination_pin'), this.value);
+        });
+
         // Auto-calculate booking amount based on chr_weight
         document.getElementById('chr_weight')?.addEventListener('input', function() {
             const chrWeight = parseFloat(this.value) || 0;
@@ -500,29 +605,122 @@
             document.getElementById('booking_amount').value = bookingAmount.toFixed(2);
         });
 
-        // Auto-fill data when AWB is selected
-        document.getElementById('awb_no')?.addEventListener('change', function() {
-            const selectedAwb = this.value;
-            // Find the AWB in the uploads list
-            const awbData = @json($awbUploads);
-            const awb = awbData.find(a => a.awb_no === selectedAwb);
+        // AWB Search Functionality
+        const awbSearchInput = document.getElementById('awb_search');
+        const awbDropdown = document.getElementById('awb_dropdown');
+        const awbSelect = document.getElementById('awb_no');
+        const awbOptions = Array.from(awbSelect.querySelectorAll('option')).slice(1); // Skip first empty option
+
+        function populateAwbDropdown(filter = '') {
+            if (!awbDropdown) return;
             
-            if (awb) {
-                if (awb.shipment_type) document.getElementById('shipment_type').value = awb.shipment_type;
-                if (awb.booking_type) document.getElementById('booking_type').value = awb.booking_type;
-                if (awb.date_of_sale) document.getElementById('date_of_sale').value = awb.date_of_sale;
-                if (awb.consignee_name) document.getElementById('consignee_name').value = awb.consignee_name;
-                if (awb.origin_pin) document.getElementById('origin_pin').value = awb.origin_pin;
-                if (awb.destination_pin) document.getElementById('destination_pin').value = awb.destination_pin;
-                if (awb.chr_weight) {
-                    document.getElementById('chr_weight').value = awb.chr_weight;
+            awbDropdown.innerHTML = '';
+            const filterLower = filter.toLowerCase();
+            
+            const filteredOptions = awbOptions.filter(option => {
+                const awbNo = option.getAttribute('data-awb') || '';
+                const destination = option.getAttribute('data-destination') || '';
+                const origin = option.getAttribute('data-origin') || '';
+                const text = option.textContent.toLowerCase();
+                
+                return !filter || 
+                       awbNo.toLowerCase().includes(filterLower) || 
+                       destination.toLowerCase().includes(filterLower) ||
+                       origin.toLowerCase().includes(filterLower) ||
+                       text.includes(filterLower);
+            });
+
+            if (filteredOptions.length === 0) {
+                awbDropdown.innerHTML = '<div class="px-4 py-3 text-sm text-gray-500">No AWB found</div>';
+                awbDropdown.classList.remove('hidden');
+                return;
+            }
+
+            filteredOptions.forEach(option => {
+                const div = document.createElement('div');
+                div.className = 'px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors border-b border-gray-100 last:border-b-0';
+                div.innerHTML = `
+                    <div class="font-semibold text-gray-900">${option.getAttribute('data-awb')}</div>
+                    <div class="text-xs text-gray-500 mt-0.5">${option.getAttribute('data-destination') || 'N/A'}</div>
+                `;
+                div.addEventListener('click', function() {
+                    awbSelect.value = option.value;
+                    awbSearchInput.value = option.textContent;
+                    awbDropdown.classList.add('hidden');
+                    
+                    // Auto-fill form data
+                    autoFillFromAwb(option);
+                });
+                awbDropdown.appendChild(div);
+            });
+            
+            awbDropdown.classList.remove('hidden');
+        }
+
+        function autoFillFromAwb(option) {
+            if (option.getAttribute('data-shipment-type')) {
+                const shipmentTypeEl = document.getElementById('shipment_type');
+                if (shipmentTypeEl) shipmentTypeEl.value = option.getAttribute('data-shipment-type');
+            }
+            if (option.getAttribute('data-booking-type')) {
+                const bookingTypeEl = document.getElementById('booking_type');
+                if (bookingTypeEl) bookingTypeEl.value = option.getAttribute('data-booking-type');
+            }
+            if (option.getAttribute('data-date-of-sale')) {
+                const dateOfSaleEl = document.getElementById('date_of_sale');
+                if (dateOfSaleEl) dateOfSaleEl.value = option.getAttribute('data-date-of-sale');
+            }
+            if (option.getAttribute('data-consignee-name')) {
+                const consigneeNameEl = document.getElementById('consignee_name');
+                if (consigneeNameEl) consigneeNameEl.value = option.getAttribute('data-consignee-name');
+            }
+            if (option.getAttribute('data-origin-pin')) {
+                const originPinEl = document.getElementById('origin_pin');
+                if (originPinEl) originPinEl.value = option.getAttribute('data-origin-pin');
+            }
+            if (option.getAttribute('data-destination-pin')) {
+                const destinationPinEl = document.getElementById('destination_pin');
+                if (destinationPinEl) destinationPinEl.value = option.getAttribute('data-destination-pin');
+            }
+            if (option.getAttribute('data-chr-weight')) {
+                const chrWeight = option.getAttribute('data-chr-weight');
+                const chrWeightEl = document.getElementById('chr_weight');
+                if (chrWeightEl) {
+                    chrWeightEl.value = chrWeight;
                     // Trigger booking amount calculation
-                    document.getElementById('chr_weight').dispatchEvent(new Event('input'));
+                    chrWeightEl.dispatchEvent(new Event('input'));
                 }
-                if (awb.pieces) document.getElementById('pieces').value = awb.pieces;
-                if (awb.network) {
-                    // Could map to origin/destination if needed
-                }
+            }
+            if (option.getAttribute('data-pieces')) {
+                const piecesEl = document.getElementById('pieces');
+                if (piecesEl) piecesEl.value = option.getAttribute('data-pieces');
+            }
+        }
+
+        // Show dropdown on focus
+        awbSearchInput?.addEventListener('focus', function() {
+            populateAwbDropdown(this.value);
+        });
+
+        // Filter on input
+        awbSearchInput?.addEventListener('input', function() {
+            populateAwbDropdown(this.value);
+        });
+
+        // Hide dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (awbSearchInput && awbDropdown && 
+                !awbSearchInput.contains(e.target) && 
+                !awbDropdown.contains(e.target)) {
+                awbDropdown.classList.add('hidden');
+            }
+        });
+
+        // Auto-fill data when AWB is selected (for form submission validation)
+        awbSelect?.addEventListener('change', function() {
+            const selectedOption = awbOptions.find(opt => opt.value === this.value);
+            if (selectedOption) {
+                autoFillFromAwb(selectedOption);
             }
         });
 

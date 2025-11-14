@@ -83,6 +83,43 @@
                     Payment Information
                 </h2>
 
+                <!-- Bulk Upload Section -->
+                <div class="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                            </svg>
+                            Bulk Upload Payments
+                        </h3>
+                        <a href="{{ route('admin.payments-into-bank.template.download') }}" class="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            Download Template
+                        </a>
+                    </div>
+                    <form method="POST" action="{{ route('admin.payments-into-bank.import') }}" enctype="multipart/form-data" class="flex items-center gap-3">
+                        @csrf
+                        <input type="file" name="file" accept=".xlsx,.xls,.csv" class="flex-1 text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" required>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                            </svg>
+                            Upload
+                        </button>
+                    </form>
+                    <p class="text-xs text-gray-600 mt-2">
+                        <span class="font-semibold">Note:</span> Upload Excel/CSV file with payment data. Duplicate transaction numbers will be skipped.
+                    </p>
+                </div>
+
+                <div class="mb-4 flex items-center gap-4">
+                    <div class="flex-1 border-t border-gray-300"></div>
+                    <span class="text-xs font-semibold text-gray-500 uppercase">OR</span>
+                    <div class="flex-1 border-t border-gray-300"></div>
+                </div>
+
                 <form method="POST" action="{{ route('admin.payments-into-bank.store') }}">
                     @csrf
 
@@ -152,7 +189,12 @@
                             </svg>
                             Category Bank <span class="required">*</span>
                         </label>
-                        <input type="text" name="category_bank" id="category_bank" class="form-input" placeholder="e.g., Salary, Expense, Revenue" value="{{ old('category_bank') }}" required>
+                        <select name="category_bank" id="category_bank" class="form-select" required>
+                            <option value="">Select Category</option>
+                            <option value="Salary" {{ old('category_bank') == 'Salary' ? 'selected' : '' }}>Salary</option>
+                            <option value="Expense" {{ old('category_bank') == 'Expense' ? 'selected' : '' }}>Expense</option>
+                            <option value="Revenue" {{ old('category_bank') == 'Revenue' ? 'selected' : '' }}>Revenue</option>
+                        </select>
                         @error('category_bank')
                             <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                         @enderror

@@ -2,26 +2,6 @@
 
 @section('title', 'Create Formula')
 
-@php
-    $existingPriorities = array_values(array_filter(array_unique(array_map(function ($priority) {
-        return strtolower(trim($priority ?? ''));
-    }, array_column($formulas, 'priority')))));
-
-    $formulaSummaries = array_map(function ($formula) {
-        return [
-            'id' => $formula['id'] ?? null,
-            'formula_name' => $formula['formula_name'] ?? '',
-            'network' => $formula['network'] ?? '',
-            'service' => $formula['service'] ?? '',
-            'priority' => $formula['priority'] ?? '',
-            'type' => $formula['type'] ?? '',
-            'scope' => $formula['scope'] ?? '',
-            'status' => $formula['status'] ?? '',
-            'value' => isset($formula['value']) ? (float) $formula['value'] : null,
-        ];
-    }, $formulas ?? []);
-@endphp
-
 @section('content')
     <style>
         .page-header {
@@ -259,47 +239,6 @@
             </div>
         </div>
 
-        <div class="mt-6">
-            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                <div class="relative flex-1">
-                    <input id="formula-search" type="text" placeholder="Search formulas by name, network, priority, or status..." class="form-input pr-10" autocomplete="off">
-                    <svg class="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 105.65 5.65a7.5 7.5 0 0010.6 10.6z"/>
-                    </svg>
-                </div>
-                <div class="flex items-center gap-2 text-sm font-semibold text-gray-600">
-                    <span>Records:</span>
-                    <span id="formula-count" class="inline-flex items-center justify-center px-3 py-1 rounded-full bg-gray-100 text-gray-800">{{ count($formulas) }}</span>
-                </div>
-            </div>
-
-            <div class="mt-4 overflow-x-auto border border-gray-200 rounded-xl">
-                <table class="min-w-full text-sm">
-                    <thead class="bg-gray-50 text-xs uppercase text-gray-500 font-semibold">
-                        <tr>
-                            <th class="px-4 py-3 text-left">Formula</th>
-                            <th class="px-4 py-3 text-left">Network & Service</th>
-                            <th class="px-4 py-3 text-left">Priority</th>
-                            <th class="px-4 py-3 text-left">Type</th>
-                            <th class="px-4 py-3 text-left">Value</th>
-                            <th class="px-4 py-3 text-left">Status</th>
-                            <th class="px-4 py-3 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="formula-table-body" class="divide-y divide-gray-100">
-                        <!-- Rows rendered via JavaScript -->
-                    </tbody>
-                </table>
-                <div id="formula-empty-state" class="py-6 px-4 text-center text-sm text-gray-500 hidden">
-                    <div class="flex flex-col items-center gap-2">
-                        <svg class="w-10 h-10 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6h6v6m2 4H7a2 2 0 01-2-2V7a2 2 0 012-2h5l2 2h5a2 2 0 012 2v10a2 2 0 01-2 2z"/>
-                        </svg>
-                        <p>No formulas found. Adjust your search or create a new formula.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -526,17 +465,10 @@
         const networkSelect = document.getElementById('network');
         const serviceSelect = document.getElementById('service');
         const services = @json($services);
-        const formulasData = @json($formulaSummaries);
         const priorityInput = document.getElementById('priority');
         const priorityError = document.getElementById('priority-error');
-        const existingPriorities = @json($existingPriorities);
-        const formulaTableBody = document.getElementById('formula-table-body');
-        const formulaEmptyState = document.getElementById('formula-empty-state');
-        const formulaCountBadge = document.getElementById('formula-count');
-        const formulaSearchInput = document.getElementById('formula-search');
         const importForm = document.getElementById('formula-import-form');
         const importInput = document.getElementById('formula-import-input');
-        const editRouteTemplate = @json(route('admin.formulas.edit', ['id' => '__ID__']));
 
         // Populate services when network changes
         function populateServices() {
@@ -618,141 +550,14 @@
             });
         }
 
-        function formatFormulaValue(value) {
-            if (value === null || value === undefined || value === '') {
-                return '-';
-            }
-            const numeric = Number(value);
-            return Number.isFinite(numeric) ? numeric.toFixed(2) : value;
-        }
-
-        function renderFormulaTable(filterTerm = '') {
-            if (!formulaTableBody || !formulaEmptyState) {
-                return;
-            }
-
-            const term = (filterTerm || '').toLowerCase();
-            const filtered = (formulasData || []).filter(item => {
-                if (!term) {
-                    return true;
-                }
-
-                return [
-                    item.formula_name,
-                    item.network,
-                    item.service,
-                    item.priority,
-                    item.type,
-                    item.scope,
-                    item.status,
-                ].some(field => (field || '').toString().toLowerCase().includes(term));
-            });
-
-            formulaTableBody.innerHTML = '';
-            const hasResults = filtered.length > 0;
-
-            if (formulaCountBadge) {
-                formulaCountBadge.textContent = filtered.length;
-            }
-
-            if (!hasResults) {
-                formulaEmptyState.classList.remove('hidden');
-                return;
-            }
-
-            formulaEmptyState.classList.add('hidden');
-
-            filtered.forEach(item => {
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-gray-50 transition-colors';
-
-                const formulaCell = document.createElement('td');
-                formulaCell.className = 'px-4 py-3 text-gray-900 font-semibold';
-                formulaCell.textContent = item.formula_name || 'Untitled';
-                tr.appendChild(formulaCell);
-
-                const networkCell = document.createElement('td');
-                networkCell.className = 'px-4 py-3 text-gray-600';
-               networkCell.innerHTML = `
-                    <div class="flex flex-col">
-                        <span>${item.network || '-'}</span>
-                        <span class="text-xs text-gray-400">${item.service || '-'}</span>
-                    </div>
-                `;
-                tr.appendChild(networkCell);
-
-                const priorityCell = document.createElement('td');
-                priorityCell.className = 'px-4 py-3 text-gray-600';
-                priorityCell.textContent = item.priority || '-';
-                tr.appendChild(priorityCell);
-
-                const typeCell = document.createElement('td');
-                typeCell.className = 'px-4 py-3 text-gray-600';
-                typeCell.innerHTML = `
-                    <div class="flex flex-col">
-                        <span>${item.type || '-'}</span>
-                        <span class="text-xs text-gray-400">${item.scope || '-'}</span>
-                    </div>
-                `;
-                tr.appendChild(typeCell);
-
-                const valueCell = document.createElement('td');
-                valueCell.className = 'px-4 py-3 text-gray-600';
-                valueCell.textContent = formatFormulaValue(item.value);
-                tr.appendChild(valueCell);
-
-                const statusCell = document.createElement('td');
-                statusCell.className = 'px-4 py-3';
-                const status = (item.status || 'Inactive').toLowerCase();
-                const statusClasses = status === 'active'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-gray-100 text-gray-600';
-                statusCell.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-semibold ${statusClasses}">${item.status || 'Inactive'}</span>`;
-                tr.appendChild(statusCell);
-
-                const actionCell = document.createElement('td');
-                actionCell.className = 'px-4 py-3 text-right';
-                if (item.id) {
-                    const editLink = document.createElement('a');
-                    editLink.href = editRouteTemplate.replace('__ID__', item.id);
-                    editLink.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition';
-                    editLink.innerHTML = `
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                        </svg>
-                        Edit
-                    `;
-                    actionCell.appendChild(editLink);
-                } else {
-                    actionCell.innerHTML = '<span class="text-xs text-gray-400">Not editable</span>';
-                }
-                tr.appendChild(actionCell);
-
-                formulaTableBody.appendChild(tr);
-            });
-        }
-
-        renderFormulaTable();
-
-        if (formulaSearchInput) {
-            formulaSearchInput.addEventListener('input', (event) => {
-                renderFormulaTable(event.target.value);
-            });
-        }
 
         // Form submission with AJAX and success popup
         document.getElementById('formulaForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             clearPriorityError();
 
-            if (priorityInput) {
-                const normalizedPriority = (priorityInput.value || '').trim().toLowerCase();
-                if (normalizedPriority && existingPriorities.includes(normalizedPriority)) {
-                    showPriorityError('This priority already exists. Please choose a different value.');
-                    priorityInput.focus();
-                    return;
-                }
-            }
+            // Priority validation is now handled server-side per network+service combination
+            // Client-side check removed since we validate against specific network+service
             
             const form = this;
             const formData = new FormData(form);
