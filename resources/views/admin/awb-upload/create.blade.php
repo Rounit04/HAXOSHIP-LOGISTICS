@@ -116,27 +116,35 @@
                     <input type="file" name="excel_file" id="excel_file" accept=".xlsx,.xls,.csv" class="form-input" required>
                     <p class="text-xs text-gray-500 mt-1">Upload Excel file with AWB data. Service Name and Network Name will be automatically matched.</p>
                 </div>
-                <button type="submit" class="admin-btn-primary px-6 py-3 text-sm font-semibold mt-6">
-                    <div class="flex items-center gap-2">
-                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                <div class="flex gap-3">
+                    <a href="{{ route('admin.awb-upload.template.download') }}" class="px-6 py-3 text-sm font-semibold rounded-xl border-2 border-orange-500 text-orange-600 hover:bg-orange-50 transition-all flex items-center gap-2 mt-6">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                         </svg>
-                        <span>Upload Excel</span>
-                    </div>
-                </button>
+                        <span>Download Template</span>
+                    </a>
+                    <button type="submit" class="admin-btn-primary px-6 py-3 text-sm font-semibold mt-6">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                            </svg>
+                            <span>Upload Excel</span>
+                        </div>
+                    </button>
+                </div>
             </div>
         </form>
         
         <div class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <p class="text-xs text-blue-800 font-semibold mb-2">Excel Format Requirements:</p>
             <ul class="text-xs text-blue-700 space-y-1 list-disc list-inside">
-                <li><strong>Row 1:</strong> Must contain indicators (1 for form fields, 0 for backend-only fields)</li>
-                <li><strong>Row 2:</strong> Must contain column headers (type, Origin, origin_zone, etc.)</li>
-                <li><strong>Row 3 onwards:</strong> Data rows</li>
-                <li><strong>Columns marked with "1" in Row 1:</strong> Will be shown in upload form</li>
-                <li><strong>Columns marked with "0" in Row 1:</strong> Will be uploaded directly to backend (Date, Goods Type, Remark, forwardNumber, transfer, transferOn, Remark 1, Remark 2)</li>
-                <li>Required columns: <strong>AWB No</strong> (must be unique, no special characters)</li>
+                <li><strong>Row 1:</strong> Must contain column headers with asterisks (*) for required fields</li>
+                <li><strong>Row 2 onwards:</strong> Data rows</li>
+                <li><strong>Fields marked with *:</strong> Are required fields (must be filled)</li>
+                <li><strong>All fields from the single upload form are included:</strong> branch, hub, awb_no, type, origin, destination, consignor, consignee, weights, network, service, amount, status, and more</li>
+                <li>Required columns: <strong>AWB No *</strong> (must be unique, special characters are allowed)</li>
                 <li>Service Name and Network Name will be automatically matched with existing services/networks</li>
+                <li><strong>Download the template</strong> to see the complete structure with all form fields</li>
             </ul>
         </div>
     </div>
@@ -240,7 +248,9 @@
                                 </svg>
                                 Origin Zone <span class="required">*</span>
                             </label>
-                            <input type="text" name="origin_zone" id="origin_zone" class="form-input" placeholder="e.g., Zone 1" required>
+                            <select name="origin_zone" id="origin_zone" class="form-select" required>
+                                <option value="">Select Origin Zone</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label class="form-label">
@@ -250,7 +260,9 @@
                                 </svg>
                                 Origin Zone Pincode <span class="required">*</span>
                             </label>
-                            <input type="text" name="origin_zone_pincode" id="origin_zone_pincode" class="form-input" placeholder="e.g., 400001" required>
+                            <select name="origin_zone_pincode" id="origin_zone_pincode" class="form-select" required>
+                                <option value="">Select Origin Pincode</option>
+                            </select>
                         </div>
                     </div>
 
@@ -278,7 +290,9 @@
                                 </svg>
                                 Destination Zone <span class="required">*</span>
                             </label>
-                            <input type="text" name="destination_zone" id="destination_zone" class="form-input" placeholder="e.g., Zone 2" required>
+                            <select name="destination_zone" id="destination_zone" class="form-select" required>
+                                <option value="">Select Destination Zone</option>
+                            </select>
                         </div>
                     </div>
 
@@ -292,7 +306,9 @@
                                 </svg>
                                 Destination Zone Pincode <span class="required">*</span>
                             </label>
-                            <input type="text" name="destination_zone_pincode" id="destination_zone_pincode" class="form-input" placeholder="e.g., 10001" required>
+                            <select name="destination_zone_pincode" id="destination_zone_pincode" class="form-select" required>
+                                <option value="">Select Destination Pincode</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label class="form-label">
@@ -303,6 +319,17 @@
                             </label>
                             <input type="text" name="reference_no" id="reference_no" class="form-input" placeholder="e.g., AWB-972">
                         </div>
+                    </div>
+
+                    <!-- Date of Sale (DOS) -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                            </svg>
+                            DOS (Date of Sale)
+                        </label>
+                        <input type="date" name="date_of_sale" id="date_of_sale" class="form-input">
                     </div>
 
                     <!-- Non-Commercial & Consignor -->
@@ -353,7 +380,7 @@
                         </div>
                     </div>
 
-                    <!-- Consignee Attn & PKC -->
+                    <!-- Consignee Attn & Goods Type -->
                     <div class="form-grid">
                         <div class="form-group">
                             <label class="form-label">
@@ -369,10 +396,21 @@
                                 <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
                                 </svg>
-                                PKC (Pieces) <span class="required">*</span>
+                                Goods Type
                             </label>
-                            <input type="number" name="pk" id="pk" class="form-input" min="1" placeholder="1" value="1" required>
+                            <input type="text" name="goods_type" id="goods_type" class="form-input" placeholder="e.g., Electronics, Documents">
                         </div>
+                    </div>
+
+                    <!-- PKC (Pieces) -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                            </svg>
+                            PKC (Pieces) <span class="required">*</span>
+                        </label>
+                        <input type="number" name="pk" id="pk" class="form-input" min="1" placeholder="1" value="1" required>
                     </div>
 
                     <!-- Actual Wt. & Volumetric Wt. -->
@@ -435,9 +473,6 @@
                             </label>
                             <select name="service_name" id="service_name" class="form-select" required>
                                 <option value="">Select Service</option>
-                                @foreach($services as $service)
-                                    <option value="{{ $service['name'] }}">{{ $service['name'] }}</option>
-                                @endforeach
                             </select>
                         </div>
                         <div class="form-group">
@@ -528,6 +563,17 @@
                         </div>
                     </div>
 
+                    <!-- Clearance Remark -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
+                            </svg>
+                            Clearance Remark
+                        </label>
+                        <input type="text" name="clearance_remark" id="clearance_remark" class="form-input" placeholder="Enter clearance remark">
+                    </div>
+
                     <!-- Status & payment_deduct -->
                     <div class="form-grid">
                         <div class="form-group">
@@ -540,9 +586,10 @@
                             <select name="status" id="status" class="form-select" required>
                                 <option value="">Select Status</option>
                                 <option value="publish">Publish</option>
-                                <option value="delivered">Delivered</option>
-                                <option value="transit">Transit</option>
-                                <option value="cancelled">Cancelled</option>
+                                <option value="Booked">Booked</option>
+                                <option value="RTO">RTO</option>
+                                <option value="Cancelled">Cancelled</option>
+                                <option value="Delivered">Delivered</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -579,15 +626,7 @@
                                 </svg>
                                 forwardServ
                             </label>
-                            <select name="forwarding_service" id="forwarding_service" class="form-select">
-                                <option value="">Select Forwarding Service</option>
-                                <option value="EKART">EKART</option>
-                                <option value="Delhivery">Delhivery</option>
-                                <option value="DHL">DHL</option>
-                                <option value="ECS">ECS</option>
-                                <option value="UPS">UPS</option>
-                                <option value="ARAMAX">ARAMAX</option>
-                            </select>
+                            <input type="text" name="forwarding_service" id="forwarding_service" class="form-input" placeholder="e.g., EKART, Delhivery, DHL">
                         </div>
                     </div>
 
@@ -600,6 +639,28 @@
                             Forward Number
                         </label>
                         <input type="text" name="forwarding_number" id="forwarding_number" class="form-input" placeholder="Enter Forward Number">
+                    </div>
+
+                    <!-- Transfer By & Transfer On -->
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label class="form-label">
+                                <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                                </svg>
+                                Transfer By
+                            </label>
+                            <input type="text" name="transfer" id="transfer" class="form-input" placeholder="Enter transfer by">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                <svg class="w-3.5 h-3.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
+                                Transfer On
+                            </label>
+                            <input type="date" name="transfer_on" id="transfer_on" class="form-input">
+                        </div>
                     </div>
 
                     <!-- Remark 1 -->
@@ -715,6 +776,16 @@
             const serviceSelect = document.getElementById('service_name');
             const services = @json($services);
 
+            // Origin fields
+            const originSelect = document.getElementById('origin');
+            const originZoneSelect = document.getElementById('origin_zone');
+            const originPincodeSelect = document.getElementById('origin_zone_pincode');
+
+            // Destination fields
+            const destinationSelect = document.getElementById('destination');
+            const destinationZoneSelect = document.getElementById('destination_zone');
+            const destinationPincodeSelect = document.getElementById('destination_zone_pincode');
+
             function buildOption(value, label, extraClasses = '', disabled = false) {
                 const option = document.createElement('option');
                 option.value = value;
@@ -737,34 +808,145 @@
                 serviceSelect.innerHTML = '';
                 serviceSelect.appendChild(buildOption('', 'Select Service'));
 
+                // If no network is selected, don't show any services
+                if (!selectedNetwork) {
+                    return;
+                }
+
                 const filteredServices = (services || []).filter(service => {
-                    const serviceNetwork = (service.network || '').trim();
+                    const serviceNetwork = (service.network || '').trim().toLowerCase();
                     const isActive = (service.status || '').toLowerCase() === 'active';
+                    const networkMatch = serviceNetwork === selectedNetwork.toLowerCase();
 
-                    if (!isActive) {
-                        return false;
-                    }
-
-                    if (!selectedNetwork) {
-                        return true;
-                    }
-
-                    return serviceNetwork === selectedNetwork;
+                    return isActive && networkMatch;
                 });
 
                 if (filteredServices.length === 0) {
-                    if (selectedNetwork) {
-                        serviceSelect.appendChild(
-                            buildOption('', 'No services available for this network', 'text-gray-400', true)
-                        );
-                    }
+                    serviceSelect.appendChild(
+                        buildOption('', 'No services available for this network', 'text-gray-400', true)
+                    );
                     serviceSelect.value = '';
                     return;
                 }
 
+                // Sort services alphabetically by name
+                filteredServices.sort((a, b) => {
+                    const nameA = (a.name || '').toLowerCase();
+                    const nameB = (b.name || '').toLowerCase();
+                    return nameA.localeCompare(nameB);
+                });
+
                 filteredServices.forEach(service => {
                     const option = buildOption(service.name || '', service.name || 'Unnamed Service');
                     serviceSelect.appendChild(option);
+                });
+            }
+
+            // Function to fetch zones by country
+            async function fetchZonesByCountry(country, zoneSelect, pincodeSelect) {
+                if (!country || !zoneSelect) return;
+
+                zoneSelect.innerHTML = '';
+                zoneSelect.appendChild(buildOption('', 'Select Zone'));
+                pincodeSelect.innerHTML = '';
+                pincodeSelect.appendChild(buildOption('', 'Select Pincode'));
+
+                try {
+                    const response = await fetch(`{{ route('admin.api.zones-by-country') }}?country=${encodeURIComponent(country)}`);
+                    const data = await response.json();
+
+                    if (data.success && data.data && data.data.length > 0) {
+                        data.data.forEach(zone => {
+                            zoneSelect.appendChild(buildOption(zone, zone));
+                        });
+                    } else {
+                        zoneSelect.appendChild(buildOption('', 'No zones found', 'text-gray-400', true));
+                    }
+                } catch (error) {
+                    console.error('Error fetching zones:', error);
+                    zoneSelect.appendChild(buildOption('', 'Error loading zones', 'text-gray-400', true));
+                }
+            }
+
+            // Function to fetch pincodes by zone
+            async function fetchPincodesByZone(country, zone, pincodeSelect) {
+                if (!country || !zone || !pincodeSelect) return;
+
+                pincodeSelect.innerHTML = '';
+                pincodeSelect.appendChild(buildOption('', 'Select Pincode'));
+
+                try {
+                    const response = await fetch(`{{ route('admin.api.pincodes-by-zone') }}?country=${encodeURIComponent(country)}&zone=${encodeURIComponent(zone)}`);
+                    const data = await response.json();
+
+                    if (data.success && data.data && data.data.length > 0) {
+                        data.data.forEach(pincode => {
+                            pincodeSelect.appendChild(buildOption(pincode, pincode));
+                        });
+                    } else {
+                        pincodeSelect.appendChild(buildOption('', 'No pincodes found', 'text-gray-400', true));
+                    }
+                } catch (error) {
+                    console.error('Error fetching pincodes:', error);
+                    pincodeSelect.appendChild(buildOption('', 'Error loading pincodes', 'text-gray-400', true));
+                }
+            }
+
+            // Origin country change handler
+            if (originSelect) {
+                originSelect.addEventListener('change', function() {
+                    const country = this.value;
+                    if (country) {
+                        fetchZonesByCountry(country, originZoneSelect, originPincodeSelect);
+                    } else {
+                        originZoneSelect.innerHTML = '';
+                        originZoneSelect.appendChild(buildOption('', 'Select Origin Zone'));
+                        originPincodeSelect.innerHTML = '';
+                        originPincodeSelect.appendChild(buildOption('', 'Select Origin Pincode'));
+                    }
+                });
+            }
+
+            // Origin zone change handler
+            if (originZoneSelect) {
+                originZoneSelect.addEventListener('change', function() {
+                    const country = originSelect?.value;
+                    const zone = this.value;
+                    if (country && zone) {
+                        fetchPincodesByZone(country, zone, originPincodeSelect);
+                    } else {
+                        originPincodeSelect.innerHTML = '';
+                        originPincodeSelect.appendChild(buildOption('', 'Select Origin Pincode'));
+                    }
+                });
+            }
+
+            // Destination country change handler
+            if (destinationSelect) {
+                destinationSelect.addEventListener('change', function() {
+                    const country = this.value;
+                    if (country) {
+                        fetchZonesByCountry(country, destinationZoneSelect, destinationPincodeSelect);
+                    } else {
+                        destinationZoneSelect.innerHTML = '';
+                        destinationZoneSelect.appendChild(buildOption('', 'Select Destination Zone'));
+                        destinationPincodeSelect.innerHTML = '';
+                        destinationPincodeSelect.appendChild(buildOption('', 'Select Destination Pincode'));
+                    }
+                });
+            }
+
+            // Destination zone change handler
+            if (destinationZoneSelect) {
+                destinationZoneSelect.addEventListener('change', function() {
+                    const country = destinationSelect?.value;
+                    const zone = this.value;
+                    if (country && zone) {
+                        fetchPincodesByZone(country, zone, destinationPincodeSelect);
+                    } else {
+                        destinationPincodeSelect.innerHTML = '';
+                        destinationPincodeSelect.appendChild(buildOption('', 'Select Destination Pincode'));
+                    }
                 });
             }
 

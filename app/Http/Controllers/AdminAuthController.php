@@ -57,6 +57,13 @@ class AdminAuthController extends Controller
         $user = User::where('email', $request->email)->first();
 
         if ($user && Hash::check($request->password, $user->password)) {
+            // Check if user has permission to access admin panel (super admin or has view_dashboard permission)
+            if (!$user->is_admin && !$user->hasPermission('view_dashboard')) {
+                return back()->withErrors([
+                    'email' => 'You do not have permission to access the admin panel.',
+                ])->withInput($request->only('email'));
+            }
+            
             // Set admin session
             session([
                 'admin_logged_in' => true,

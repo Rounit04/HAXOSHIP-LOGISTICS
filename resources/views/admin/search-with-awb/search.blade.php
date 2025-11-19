@@ -17,7 +17,11 @@
             border-radius: 12px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.06);
             border: 1px solid rgba(0,0,0,0.06);
-            overflow: hidden;
+            overflow: visible !important;
+            position: relative;
+        }
+        .search-card > * {
+            overflow: visible;
         }
         .form-group {
             margin-bottom: 20px;
@@ -57,9 +61,13 @@
             display: flex;
             gap: 12px;
             align-items: flex-end;
+            position: relative;
+            z-index: 1;
         }
         .search-input-group {
             flex: 1;
+            position: relative;
+            z-index: 10;
         }
         .awb-details-card {
             background: white;
@@ -126,6 +134,78 @@
             justify-content: center;
             box-shadow: 0 4px 16px rgba(255, 117, 15, 0.15);
         }
+        .awb-input-wrapper {
+            position: relative;
+            width: 100%;
+            z-index: 10;
+        }
+        .awb-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            width: 100%;
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            margin-top: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            z-index: 9999;
+            animation: slideDown 0.2s ease-out;
+        }
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .awb-dropdown-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #f3f4f6;
+            transition: all 0.2s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .awb-dropdown-item:hover {
+            background: #fff5ed;
+            border-left: 3px solid #FF750F;
+        }
+        .awb-dropdown-item:last-child {
+            border-bottom: none;
+        }
+        .awb-dropdown-item .awb-number {
+            font-weight: 600;
+            color: #374151;
+            font-size: 14px;
+        }
+        .awb-dropdown-item .awb-info {
+            font-size: 12px;
+            color: #6b7280;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .awb-dropdown-item .awb-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .awb-dropdown-empty {
+            padding: 20px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+        }
         @media (max-width: 768px) {
             .detail-row {
                 grid-template-columns: 1fr;
@@ -163,21 +243,32 @@
             AWB Info
         </h2>
 
-        <form method="POST" action="{{ route('admin.search-with-awb.search.submit') }}" class="search-form">
+        <form method="POST" action="{{ route('admin.search-with-awb.search.submit') }}" class="search-form" id="searchAWBForm">
             @csrf
             <div class="search-input-group">
                 <label class="form-label">
                     AWB Number <span class="required">*</span>
                 </label>
-                <input 
-                    type="text" 
-                    name="awb_number" 
-                    class="form-input" 
-                    placeholder="Search AWB" 
-                    value="{{ old('awb_number', $awbNumber ?? '') }}"
-                    required
-                    autofocus
-                >
+                <div class="awb-input-wrapper">
+                    <input 
+                        type="text" 
+                        name="awb_number" 
+                        id="awb_number_input"
+                        class="form-input" 
+                        placeholder="Type or select AWB number" 
+                        value="{{ old('awb_number', $awbNumber ?? '') }}"
+                        required
+                        autofocus
+                        autocomplete="off"
+                        list="awb_numbers_list"
+                    >
+                    <datalist id="awb_numbers_list">
+                        <!-- Options will be populated by JavaScript -->
+                    </datalist>
+                    <div id="awb_dropdown" class="awb-dropdown" style="display: none;">
+                        <!-- Dropdown items will be populated by JavaScript -->
+                    </div>
+                </div>
             </div>
             <button type="submit" class="admin-btn-primary px-6 py-3">
                 <div class="flex items-center gap-2">
@@ -540,4 +631,165 @@
             </div>
         @endif
     @endif
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const awbInput = document.getElementById('awb_number_input');
+            const awbDropdown = document.getElementById('awb_dropdown');
+            const datalist = document.getElementById('awb_numbers_list');
+            let searchTimeout;
+            let allAwbNumbers = [];
+
+            // Fetch AWB numbers on page load
+            fetchAwbNumbers('');
+
+            // Fetch AWB numbers from API
+            function fetchAwbNumbers(search = '') {
+                const url = '{{ route("admin.search-with-awb.awb-numbers") }}' + (search ? '?search=' + encodeURIComponent(search) : '');
+                
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        allAwbNumbers = data;
+                        populateDatalist(data);
+                        if (awbInput.value) {
+                            showDropdown(data);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching AWB numbers:', error);
+                    });
+            }
+
+            // Populate datalist
+            function populateDatalist(awbNumbers) {
+                datalist.innerHTML = '';
+                awbNumbers.forEach(awb => {
+                    const option = document.createElement('option');
+                    option.value = awb.awb_no;
+                    option.textContent = awb.awb_no;
+                    datalist.appendChild(option);
+                });
+            }
+
+            // Show dropdown with AWB numbers
+            function showDropdown(awbNumbers) {
+                if (awbNumbers.length === 0) {
+                    awbDropdown.innerHTML = '<div class="awb-dropdown-empty">No AWB numbers found</div>';
+                    awbDropdown.style.display = 'block';
+                    return;
+                }
+
+                awbDropdown.innerHTML = '';
+                awbNumbers.slice(0, 20).forEach(awb => {
+                    const item = document.createElement('div');
+                    item.className = 'awb-dropdown-item';
+                    item.innerHTML = `
+                        <div>
+                            <div class="awb-number">${awb.awb_no}</div>
+                            <div class="awb-info">
+                                ${awb.branch ? `<span>Branch: ${awb.branch}</span>` : ''}
+                                ${awb.date_of_sale ? `<span>• ${awb.date_of_sale}</span>` : ''}
+                            </div>
+                        </div>
+                        ${awb.status ? `<span class="awb-badge" style="background: ${awb.status === 'Active' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)'}; color: ${awb.status === 'Active' ? '#059669' : '#dc2626'};">${awb.status}</span>` : ''}
+                    `;
+                    item.addEventListener('click', function() {
+                        awbInput.value = awb.awb_no;
+                        awbDropdown.style.display = 'none';
+                        awbInput.focus();
+                    });
+                    awbDropdown.appendChild(item);
+                });
+                awbDropdown.style.display = 'block';
+            }
+
+            // Hide dropdown
+            function hideDropdown() {
+                awbDropdown.style.display = 'none';
+            }
+
+            // Handle input events
+            awbInput.addEventListener('input', function() {
+                const value = this.value.trim();
+                
+                clearTimeout(searchTimeout);
+                
+                if (value.length === 0) {
+                    hideDropdown();
+                    return;
+                }
+
+                // Debounce search
+                searchTimeout = setTimeout(() => {
+                    const filtered = allAwbNumbers.filter(awb => 
+                        awb.awb_no.toLowerCase().includes(value.toLowerCase()) ||
+                        (awb.branch && awb.branch.toLowerCase().includes(value.toLowerCase()))
+                    );
+                    showDropdown(filtered);
+                }, 300);
+            });
+
+            // Show dropdown on focus if there's a value
+            awbInput.addEventListener('focus', function() {
+                if (this.value.trim()) {
+                    const value = this.value.trim();
+                    const filtered = allAwbNumbers.filter(awb => 
+                        awb.awb_no.toLowerCase().includes(value.toLowerCase()) ||
+                        (awb.branch && awb.branch.toLowerCase().includes(value.toLowerCase()))
+                    );
+                    showDropdown(filtered);
+                } else {
+                    showDropdown(allAwbNumbers.slice(0, 20));
+                }
+            });
+
+            // Hide dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                const inputWrapper = awbInput.closest('.awb-input-wrapper');
+                if (!inputWrapper.contains(e.target)) {
+                    hideDropdown();
+                }
+            });
+
+            // Handle keyboard navigation
+            awbInput.addEventListener('keydown', function(e) {
+                const items = awbDropdown.querySelectorAll('.awb-dropdown-item');
+                const currentIndex = Array.from(items).findIndex(item => item.classList.contains('highlighted'));
+                
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
+                    items.forEach(item => item.classList.remove('highlighted'));
+                    if (items[nextIndex]) {
+                        items[nextIndex].classList.add('highlighted');
+                        items[nextIndex].scrollIntoView({ block: 'nearest' });
+                    }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prevIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
+                    items.forEach(item => item.classList.remove('highlighted'));
+                    if (items[prevIndex]) {
+                        items[prevIndex].classList.add('highlighted');
+                        items[prevIndex].scrollIntoView({ block: 'nearest' });
+                    }
+                } else if (e.key === 'Enter' && currentIndex >= 0) {
+                    e.preventDefault();
+                    items[currentIndex].click();
+                } else if (e.key === 'Escape') {
+                    hideDropdown();
+                }
+            });
+
+            // Add highlight style
+            const style = document.createElement('style');
+            style.textContent = `
+                .awb-dropdown-item.highlighted {
+                    background: #fff5ed;
+                    border-left: 3px solid #FF750F;
+                }
+            `;
+            document.head.appendChild(style);
+        });
+    </script>
 @endsection

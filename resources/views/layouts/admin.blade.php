@@ -15,6 +15,12 @@
                 $cssFile = 'assets/app-D8se_Iem.css';
                 $jsFile = 'assets/app-CvgioS1y.js';
             }
+            
+            // Get current admin user
+            $currentAdminUser = null;
+            if (session()->has('admin_logged_in') && session('admin_user_id')) {
+                $currentAdminUser = \App\Models\User::find(session('admin_user_id'));
+            }
         @endphp
         <link rel="stylesheet" href="{{ asset('build/' . $cssFile) }}">
         <script type="module" src="{{ asset('build/' . $jsFile) }}"></script>
@@ -704,6 +710,7 @@
                     <!-- Navigation Menu -->
                     <nav class="p-4 space-y-1">
                         <!-- Dashboard -->
+                        @if(($currentAdminUser && ($currentAdminUser->hasPermission('view_dashboard') || $currentAdminUser->is_admin)))
                         <a href="{{ route('admin.dashboard') }}" class="nav-link flex items-center gap-3 px-4 py-3 rounded-xl @if(request()->routeIs('admin.dashboard')) active @endif">
                             <div class="w-10 h-10 rounded-lg flex items-center justify-center transition-all" style="@if(request()->routeIs('admin.dashboard')) background: rgba(255,255,255,0.2); @else background: rgba(255, 117, 15, 0.08); @endif">
                                 <svg class="w-5 h-5 @if(request()->routeIs('admin.dashboard')) text-white @else text-gray-600 @endif" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -712,8 +719,10 @@
                             </div>
                             <span class="font-semibold text-sm">Dashboard</span>
                         </a>
+                        @endif
 
                         <!-- User Roles & Permission -->
+                        @if(($currentAdminUser && ($currentAdminUser->hasPermission('manage_roles') || $currentAdminUser->is_admin)))
                         <a href="{{ route('admin.roles') }}" class="nav-link flex items-center justify-between px-4 py-3 rounded-xl @if(request()->routeIs('admin.roles*')) active @endif">
                             <div class="flex items-center gap-3">
                                 <div class="w-10 h-10 rounded-lg flex items-center justify-center transition-all" style="@if(request()->routeIs('admin.roles*')) background: rgba(255,255,255,0.2); @else background: rgba(255, 117, 15, 0.08); @endif">
@@ -727,8 +736,10 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                             </svg>
                         </a>
+                        @endif
 
                         <!-- Rate Calculator -->
+                        @if(($currentAdminUser && ($currentAdminUser->hasPermission('access_rate_calculator') || $currentAdminUser->is_admin)))
                         <a href="{{ route('admin.rate-calculator') }}" class="nav-link flex items-center gap-3 px-4 py-3 rounded-xl @if(request()->routeIs('admin.rate-calculator*')) active @endif">
                             <div class="w-10 h-10 rounded-lg flex items-center justify-center transition-all" style="@if(request()->routeIs('admin.rate-calculator*')) background: rgba(255,255,255,0.2); @else background: rgba(255, 117, 15, 0.08); @endif">
                                 <svg class="w-5 h-5 @if(request()->routeIs('admin.rate-calculator*')) text-white @else text-gray-600 @endif" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -737,8 +748,10 @@
                             </div>
                             <span class="font-semibold text-sm">Rate Calculator</span>
                         </a>
+                        @endif
 
                         <!-- Search with AWB -->
+                        @if(($currentAdminUser && ($currentAdminUser->hasPermission('search_awb') || $currentAdminUser->is_admin)))
                         <div class="relative nav-link @if(request()->routeIs('admin.search-with-awb*')) active @endif">
                             <div class="flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-all duration-300" onclick="toggleSubmenu('search-awb-submenu')">
                                 <div class="flex items-center gap-3 flex-1">
@@ -781,8 +794,10 @@
                                 </a>
                             </div>
                         </div>
+                        @endif
 
                         <!-- Networks -->
+                        @if(($currentAdminUser && ($currentAdminUser->hasPermission('view_networks') || $currentAdminUser->hasPermission('create_networks') || $currentAdminUser->hasPermission('edit_networks') || $currentAdminUser->is_admin)))
                         <div class="relative nav-link @if(request()->routeIs('admin.networks*')) active @endif">
                             <div class="flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-all duration-300" onclick="toggleSubmenu('networks-submenu')">
                                 <div class="flex items-center gap-3 flex-1">
@@ -825,8 +840,10 @@
                                 </a>
                             </div>
                         </div>
+                        @endif
 
                         <!-- Transactions -->
+                        @if(($currentAdminUser && ($currentAdminUser->hasPermission('view_transactions') || $currentAdminUser->is_admin)))
                         <a href="{{ route('admin.transactions.all') }}" class="nav-link flex items-center gap-3 px-4 py-3 rounded-xl @if(request()->routeIs('admin.transactions*')) active @endif">
                             <div class="w-10 h-10 rounded-lg flex items-center justify-center transition-all" style="@if(request()->routeIs('admin.transactions*')) background: rgba(255,255,255,0.2); @else background: rgba(255, 117, 15, 0.08); @endif">
                                 <svg class="w-5 h-5 @if(request()->routeIs('admin.transactions*')) text-white @else text-gray-600 @endif" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -835,8 +852,10 @@
                             </div>
                             <span class="font-semibold text-sm">Transactions</span>
                         </a>
+                        @endif
 
                         <!-- Services -->
+                        @if(($currentAdminUser && ($currentAdminUser->hasPermission('view_services') || $currentAdminUser->hasPermission('create_services') || $currentAdminUser->hasPermission('edit_services') || $currentAdminUser->is_admin)))
                         <div class="relative nav-link @if(request()->routeIs('admin.services*')) active @endif">
                             <div class="flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-all duration-300" onclick="toggleSubmenu('services-submenu')">
                                 <div class="flex items-center gap-3 flex-1">
@@ -879,6 +898,7 @@
                                 </a>
                             </div>
                         </div>
+                        @endif
 
                         <!-- Countries -->
                         <div class="relative nav-link @if(request()->routeIs('admin.countries*')) active @endif">

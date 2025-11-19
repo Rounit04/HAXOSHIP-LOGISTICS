@@ -297,15 +297,66 @@
             </div>
         </div>
 
+        <!-- Success Popup -->
         @if(session('success'))
-            <div class="mb-4 p-4 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div id="success-popup" class="fixed top-4 right-4 z-50 bg-white rounded-lg shadow-2xl border-2 border-green-200 p-4 flex items-center gap-3 min-w-[320px] max-w-md animate-slide-in">
+                <div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                     </svg>
                 </div>
-                <p class="text-green-700 font-bold text-sm">{{ session('success') }}</p>
+                <div class="flex-1">
+                    <p class="text-green-700 font-bold text-sm">{{ session('success') }}</p>
+                </div>
+                <button onclick="closeSuccessPopup()" class="text-gray-400 hover:text-gray-600 transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
             </div>
+            <style>
+                @keyframes slide-in {
+                    from {
+                        transform: translateX(100%);
+                        opacity: 0;
+                    }
+                    to {
+                        transform: translateX(0);
+                        opacity: 1;
+                    }
+                }
+                .animate-slide-in {
+                    animation: slide-in 0.3s ease-out;
+                }
+                .closing {
+                    animation: slide-out 0.3s ease-in forwards;
+                }
+                @keyframes slide-out {
+                    from {
+                        transform: translateX(0);
+                        opacity: 1;
+                    }
+                    to {
+                        transform: translateX(100%);
+                        opacity: 0;
+                    }
+                }
+            </style>
+            <script>
+                function closeSuccessPopup() {
+                    const popup = document.getElementById('success-popup');
+                    if (popup) {
+                        popup.classList.add('closing');
+                        setTimeout(() => {
+                            popup.remove();
+                        }, 300);
+                    }
+                }
+                // Auto close after 5 seconds
+                setTimeout(() => {
+                    closeSuccessPopup();
+                }, 5000);
+            </script>
         @endif
 
         @if(session('error'))

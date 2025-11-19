@@ -119,12 +119,12 @@
                     <h2 class="text-2xl font-bold text-gray-900 mb-2">User List</h2>
                     <p class="text-sm text-gray-600">Manage and assign roles to users</p>
                 </div>
-                <button class="admin-btn-primary px-6 py-3 text-sm">
+                <button onclick="showCreateUserModal()" class="admin-btn-primary px-6 py-3 text-sm">
                     <div class="flex items-center gap-2">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
                         </svg>
-                        <span>Add New User</span>
+                        <span>Add New Admin User</span>
                     </div>
                 </button>
             </div>
@@ -423,70 +423,27 @@
                             </div>
                             <span class="text-base">Permissions</span>
                         </label>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="view_dashboard" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">View Dashboard</span>
-                                    <span class="text-xs text-gray-600 font-medium">Access dashboard view</span>
+                        <div class="space-y-6">
+                            @forelse($permissions ?? [] as $group => $groupPermissions)
+                                <div class="border-2 border-gray-100 rounded-xl p-6 bg-gray-50">
+                                    <h4 class="font-bold text-gray-900 mb-4 text-lg capitalize">{{ $group ?? 'Other' }}</h4>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        @foreach($groupPermissions as $permission)
+                                            <label class="flex items-start gap-3 p-4 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
+                                                <input type="checkbox" name="permissions[]" value="{{ $permission->slug }}" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
+                                                <div class="flex-1">
+                                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-sm">{{ $permission->name }}</span>
+                                                    @if($permission->description)
+                                                        <span class="text-xs text-gray-600 font-medium">{{ $permission->description }}</span>
+                                                    @endif
+                                                </div>
+                                            </label>
+                                        @endforeach
+                                    </div>
                                 </div>
-                            </label>
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="manage_users" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">Manage Users</span>
-                                    <span class="text-xs text-gray-600 font-medium">Create, edit, delete users</span>
-                                </div>
-                            </label>
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="manage_roles" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">Manage Roles</span>
-                                    <span class="text-xs text-gray-600 font-medium">Create and assign roles</span>
-                                </div>
-                            </label>
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="view_reports" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">View Reports</span>
-                                    <span class="text-xs text-gray-600 font-medium">Access reports and analytics</span>
-                                </div>
-                            </label>
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="manage_settings" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">Manage Settings</span>
-                                    <span class="text-xs text-gray-600 font-medium">Modify system settings</span>
-                                </div>
-                            </label>
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="manage_delivery" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">Manage Delivery</span>
-                                    <span class="text-xs text-gray-600 font-medium">Control delivery operations</span>
-                                </div>
-                            </label>
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="manage_merchants" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">Manage Merchants</span>
-                                    <span class="text-xs text-gray-600 font-medium">Manage merchant accounts</span>
-                                </div>
-                            </label>
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="manage_parcels" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">Manage Parcels</span>
-                                    <span class="text-xs text-gray-600 font-medium">Handle parcel operations</span>
-                                </div>
-                            </label>
-                            <label class="flex items-start gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-50 cursor-pointer transition-all duration-300 group shadow-sm hover:shadow-md">
-                                <input type="checkbox" name="permissions[]" value="view_analytics" class="mt-1 w-5 h-5 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500 focus:ring-2 cursor-pointer">
-                                <div class="flex-1">
-                                    <span class="font-bold text-gray-900 block mb-1 group-hover:text-orange-700 transition text-base">View Analytics</span>
-                                    <span class="text-xs text-gray-600 font-medium">Access analytics dashboard</span>
-                                </div>
-                            </label>
+                            @empty
+                                <p class="text-gray-600 text-center py-8">No permissions available. Please run the permission seeder.</p>
+                            @endforelse
                         </div>
                     </div>
 
@@ -533,26 +490,28 @@
                         </div>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        @foreach($roles as $role)
+                        @forelse($roles ?? [] as $role)
                             <div class="admin-card p-6 group hover:shadow-xl transition-all duration-300 border-2 border-gray-200 hover:border-orange-300 bg-gradient-to-br from-white to-gray-50">
                                 <div class="flex items-center justify-between">
                                     <div class="flex items-center gap-5">
                                         <div class="w-16 h-16 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg transition-transform group-hover:scale-110 group-hover:rotate-3" style="background: var(--admin-gradient);">
-                                            {{ strtoupper(substr($role, 0, 1)) }}
+                                            {{ strtoupper(substr($role->name, 0, 1)) }}
                                         </div>
                                         <div>
-                                            <h4 class="font-bold text-gray-900 text-xl mb-1">{{ $role }}</h4>
-                                            <p class="text-xs text-gray-600 font-semibold uppercase tracking-wide">Active Role</p>
+                                            <h4 class="font-bold text-gray-900 text-xl mb-1">{{ $role->name }}</h4>
+                                            <p class="text-xs text-gray-600 font-semibold uppercase tracking-wide">{{ $role->permissions->count() }} Permissions</p>
+                                            @if($role->description)
+                                                <p class="text-xs text-gray-500 mt-1">{{ $role->description }}</p>
+                                            @endif
                                         </div>
                                     </div>
-                                    <button class="w-11 h-11 rounded-lg flex items-center justify-center text-red-600 hover:bg-red-50 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-all duration-300 border-2 border-red-200 hover:border-red-300 shadow-sm hover:shadow-md" title="Delete Role">
-                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                                        </svg>
-                                    </button>
                                 </div>
                             </div>
-                        @endforeach
+                        @empty
+                            <div class="col-span-2 text-center py-8 text-gray-600">
+                                <p>No roles created yet. Create your first role above.</p>
+                            </div>
+                        @endforelse
                     </div>
                 </div>
             </div>
@@ -579,6 +538,96 @@
         }
     </style>
 
+    <!-- Create Admin User Modal -->
+    <div id="createUserModal" class="fixed inset-0 bg-black bg-opacity-50 z-[9999] hidden items-center justify-center p-4" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="sticky top-0 bg-white border-b-2 border-gray-200 p-6 flex items-center justify-between">
+                <h3 class="text-2xl font-bold text-gray-900">Create New Admin User</h3>
+                <button onclick="closeCreateUserModal()" class="w-10 h-10 rounded-lg flex items-center justify-center text-gray-600 hover:bg-gray-100 transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <form action="{{ route('admin.roles.create-admin-user') }}" method="POST" class="p-6 space-y-6">
+                @csrf
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-bold text-gray-900 mb-2">Name</label>
+                        <input type="text" name="name" required class="admin-input w-full" placeholder="Full Name">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-bold text-gray-900 mb-2">Email</label>
+                        <input type="email" name="email" required class="admin-input w-full" placeholder="email@example.com">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-bold text-gray-900 mb-2">Password</label>
+                        <input type="password" name="password" required minlength="8" class="admin-input w-full" placeholder="Minimum 8 characters">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-bold text-gray-900 mb-2">Confirm Password</label>
+                        <input type="password" name="password_confirmation" required minlength="8" class="admin-input w-full" placeholder="Confirm password">
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-bold text-gray-900 mb-2">Assign Role (Optional)</label>
+                    <select name="role_id" class="admin-select w-full">
+                        <option value="">No Role</option>
+                        @foreach($roles ?? [] as $role)
+                            <option value="{{ $role->id }}">{{ $role->name }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-bold text-gray-900 mb-4">Select Permissions</label>
+                    <div class="space-y-4 max-h-96 overflow-y-auto border-2 border-gray-200 rounded-xl p-4">
+                        @forelse($permissions ?? [] as $group => $groupPermissions)
+                            <div class="mb-6">
+                                <h5 class="font-bold text-gray-900 mb-3 capitalize text-base">{{ $group ?? 'Other' }}</h5>
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    @foreach($groupPermissions as $permission)
+                                        <label class="flex items-start gap-2 p-3 border-2 border-gray-200 rounded-lg hover:border-orange-400 hover:bg-orange-50 cursor-pointer transition">
+                                            <input type="checkbox" name="permissions[]" value="{{ $permission->slug }}" class="mt-1 w-4 h-4 rounded border-2 border-gray-300 text-orange-600 focus:ring-orange-500">
+                                            <div class="flex-1">
+                                                <span class="font-semibold text-gray-900 text-sm block">{{ $permission->name }}</span>
+                                                @if($permission->description)
+                                                    <span class="text-xs text-gray-600">{{ $permission->description }}</span>
+                                                @endif
+                                            </div>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @empty
+                            <p class="text-gray-600 text-center py-4">No permissions available.</p>
+                        @endforelse
+                    </div>
+                </div>
+                
+                <div class="flex gap-4 pt-4 border-t-2 border-gray-200">
+                    <button type="submit" class="admin-btn-primary px-8 py-3 flex-1">
+                        <div class="flex items-center justify-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            <span>Create Admin User</span>
+                        </div>
+                    </button>
+                    <button type="button" onclick="closeCreateUserModal()" class="px-8 py-3 rounded-xl border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-50 transition">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         function switchTab(tab) {
             // Remove active class from all tabs and content
@@ -589,7 +638,48 @@
             event.target.classList.add('active');
             document.getElementById(tab + '-tab').classList.add('active');
         }
+        
+        function showCreateUserModal() {
+            const modal = document.getElementById('createUserModal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.style.display = 'flex';
+                document.body.style.overflow = 'hidden'; // Prevent background scrolling
+            }
+        }
+        
+        function closeCreateUserModal() {
+            const modal = document.getElementById('createUserModal');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.style.display = 'none';
+                document.body.style.overflow = ''; // Restore scrolling
+            }
+        }
+        
+        // Close modal on outside click
+        document.addEventListener('DOMContentLoaded', function() {
+            const modal = document.getElementById('createUserModal');
+            if (modal) {
+                modal.addEventListener('click', function(e) {
+                    if (e.target === this) {
+                        closeCreateUserModal();
+                    }
+                });
+            }
+            
+            // Close modal on Escape key
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    const modal = document.getElementById('createUserModal');
+                    if (modal && !modal.classList.contains('hidden')) {
+                        closeCreateUserModal();
+                    }
+                }
+            });
+        });
     </script>
 @endsection
+
 
 

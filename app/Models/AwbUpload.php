@@ -12,7 +12,7 @@ class AwbUpload extends Model
         'date_of_sale', 'invoice_date', 'non_commercial', 'consignor', 'consignor_attn',
         'consignee', 'consignee_attn', 'goods_type', 'pk', 'actual_weight', 'volumetric_weight',
         'chargeable_weight', 'network_name', 'service_name', 'amour', 'medical_shipment',
-        'invoice_value', 'is_coc', 'cod_amount', 'clearance_required', 'remark', 'status',
+        'invoice_value', 'is_coc', 'cod_amount', 'clearance_required', 'clearance_remark', 'remark', 'status',
         'payment_deduct', 'location', 'forwarding_service', 'forwarding_number', 'transfer',
         'transfer_on', 'remark_1', 'remark_2', 'booking_type', 'shipment_type',
         'display_service_name', 'operation_remark', 'remark_3', 'remark_4', 'remark_5',

@@ -49,8 +49,34 @@ trait ImportMethods
             $import = new ServicesImport();
             Excel::import($import, $file);
             
+            // If there are errors, show them and DO NOT import anything
+            if (!empty($import->errors)) {
+                // Format errors for better display
+                $errorMessages = [];
+                foreach ($import->errors as $error) {
+                    $errorMessages[] = $error;
+                }
+                
+                $errorMessage = implode("\n", $errorMessages);
+                
+                // Add summary at the top
+                $totalErrors = count($import->errors);
+                $summary = "Found {$totalErrors} error(s) in your file. Please fix all errors before importing.\n\n";
+                $errorMessage = $summary . $errorMessage;
+                
+                return redirect()->route('admin.services.all')
+                    ->with('error', $errorMessage)
+                    ->with('import_failed', true);
+            }
+            
+            // Only show success if everything was imported
+            if ($import->importedCount > 0) {
+                return redirect()->route('admin.services.all')
+                    ->with('success', "✅ Bulk import completed successfully! {$import->importedCount} service(s) imported.");
+            } else {
             return redirect()->route('admin.services.all')
-                ->with('success', "Bulk import completed! Service(s) imported successfully.");
+                    ->with('error', 'No services were imported. Please check your file and try again.');
+            }
         } catch (\Exception $e) {
             return redirect()->back()
                 ->with('error', 'Error importing Excel file: ' . $e->getMessage());
@@ -87,8 +113,36 @@ trait ImportMethods
             $import = new ZonesImport();
             Excel::import($import, $file);
             
-            return redirect()->route('admin.zones.all')
-                ->with('success', "Bulk import completed! Zone(s) imported successfully.");
+            // STEP 1: Check for errors first - if errors exist, show them and DO NOT import anything
+            if (!empty($import->errors)) {
+                // Format errors for better display
+                $errorMessages = [];
+                foreach ($import->errors as $error) {
+                    $errorMessages[] = $error;
+                }
+                
+                $errorMessage = implode("\n", $errorMessages);
+                
+                // Add summary at the top
+                $totalErrors = count($import->errors);
+                $summary = "Found {$totalErrors} error(s) in your file. Please fix all errors before importing.\n\n";
+                $errorMessage = $summary . $errorMessage;
+                
+                return redirect()->route('admin.zones.all')
+                    ->with('error', $errorMessage)
+                    ->with('import_failed', true);
+            }
+            
+            // STEP 2: Only if there are NO errors, check if import was successful
+            // The import only happens if there are no errors (all-or-nothing approach)
+            if ($import->importedCount > 0) {
+                return redirect()->route('admin.zones.all')
+                    ->with('success', "✅ Bulk import completed successfully! {$import->importedCount} zone(s) imported.");
+            } else {
+                // This should rarely happen, but handle it just in case
+                return redirect()->route('admin.zones.all')
+                    ->with('error', 'No zones were imported. Please check your file and try again.');
+            }
         } catch (\Exception $e) {
             return redirect()->back()
                 ->with('error', 'Error importing Excel file: ' . $e->getMessage());
@@ -192,20 +246,189 @@ trait ImportMethods
 
     public function importShippingCharges(Request $request)
     {
-        $request->validate([
-            'excel_file' => 'required|mimes:xlsx,xls,csv|max:10240',
-        ]);
+        // Check if request has file at all (before validation)
+        if (!$request->hasFile('excel_file')) {
+            if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No file was uploaded.',
+                    'errors' => ['Please select a file to upload.'],
+                ], 422);
+            }
+            return redirect()->back()->with('error', 'No file was uploaded. Please select a file to import.');
+        }
+        
+        try {
+            // Increase file size limit for large datasets (up to 50MB)
+            $request->validate([
+                'excel_file' => 'required|mimes:xlsx,xls,csv|max:51200',
+            ], [
+                'excel_file.required' => 'Please select a file to upload.',
+                'excel_file.mimes' => 'The file must be an Excel file (.xlsx, .xls) or CSV file (.csv).',
+                'excel_file.max' => 'The file size must not exceed 50MB.',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // Handle validation errors for AJAX requests
+            if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                $errorMessages = [];
+                foreach ($e->errors() as $fieldErrors) {
+                    foreach ($fieldErrors as $error) {
+                        $errorMessages[] = $error;
+                    }
+                }
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed. Please check your file.',
+                    'errors' => $errorMessages,
+                ], 422);
+            }
+            throw $e;
+        }
 
         try {
-            $file = $request->file('excel_file');
-            $import = new ShippingChargesImport();
-            Excel::import($import, $file);
+            // Increase PHP limits for large file processing
+            ini_set('memory_limit', '512M');
+            ini_set('max_execution_time', '600'); // 10 minutes
             
-            return redirect()->route('admin.shipping-charges.all')
-                ->with('success', "Bulk import completed! Shipping charge(s) imported successfully.");
+            $file = $request->file('excel_file');
+            
+            // Validate file exists and is readable
+            if (!$file || !$file->isValid()) {
+                $errorMsg = 'The uploaded file is invalid or could not be read.';
+                if ($file && $file->getError() !== UPLOAD_ERR_OK) {
+                    $uploadErrors = [
+                        UPLOAD_ERR_INI_SIZE => 'The uploaded file exceeds the upload_max_filesize directive in php.ini.',
+                        UPLOAD_ERR_FORM_SIZE => 'The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form.',
+                        UPLOAD_ERR_PARTIAL => 'The uploaded file was only partially uploaded.',
+                        UPLOAD_ERR_NO_FILE => 'No file was uploaded.',
+                        UPLOAD_ERR_NO_TMP_DIR => 'Missing a temporary folder.',
+                        UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
+                        UPLOAD_ERR_EXTENSION => 'A PHP extension stopped the file upload.',
+                    ];
+                    $errorMsg = $uploadErrors[$file->getError()] ?? $errorMsg;
+                }
+                
+                if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => $errorMsg,
+                        'errors' => [$errorMsg],
+                    ], 422);
+                }
+                throw new \Exception($errorMsg);
+            }
+            
+            $import = new ShippingChargesImport();
+            
+            try {
+                Excel::import($import, $file);
+            } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
+                // Specific error for Excel file reading issues
+                throw new \Exception('Failed to read Excel file. Please ensure the file is not corrupted and is in .xlsx, .xls, or .csv format. Error: ' . $e->getMessage());
+            } catch (\Exception $e) {
+                // Re-throw with more context
+                throw new \Exception('Error processing Excel file: ' . $e->getMessage());
+            }
+            
+            // Check if this is an AJAX request
+            if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                // STEP 1: Check for errors first - if errors exist, show them and DO NOT import anything
+                if (!empty($import->errors)) {
+                    // Format errors for better display
+                    $errorMessages = [];
+                    foreach ($import->errors as $error) {
+                        $errorMessages[] = $error;
+                    }
+                    
+                    $totalErrors = count($import->errors);
+                    $summary = "Found {$totalErrors} error(s) in your file. Please fix all errors before importing.";
+                    
+                    return response()->json([
+                        'success' => false,
+                        'message' => $summary,
+                        'errors' => $errorMessages,
+                    ], 422);
+                }
+                
+                // STEP 2: Only if there are NO errors, check if import was successful
+                // The import only happens if there are no errors (all-or-nothing approach)
+                // Note: importedCount includes both newly inserted and updated records
+                if ($import->importedCount > 0) {
+                    $message = "Bulk import completed successfully! {$import->importedCount} shipping charge(s) processed (inserted or updated).";
+                    return response()->json([
+                        'success' => true,
+                        'message' => $message,
+                        'imported_count' => $import->importedCount,
+                        'redirect' => route('admin.shipping-charges.all'),
+                    ]);
+                } else {
+                    // This should rarely happen, but handle it just in case
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'No shipping charges were imported. Please check your file and try again.',
+                        'errors' => ['The file appears to be empty or all rows were skipped.'],
+                    ], 422);
+                }
+            } else {
+                // Non-AJAX request - use redirects (for backward compatibility)
+                // STEP 1: Check for errors first - if errors exist, show them and DO NOT import anything
+                if (!empty($import->errors)) {
+                    // Format errors for better display
+                    $errorMessages = [];
+                    foreach ($import->errors as $error) {
+                        $errorMessages[] = $error;
+                    }
+                    
+                    $errorMessage = implode("\n", $errorMessages);
+                    
+                    // Add summary at the top
+                    $totalErrors = count($import->errors);
+                    $summary = "Found {$totalErrors} error(s) in your file. Please fix all errors before importing.\n\n";
+                    $errorMessage = $summary . $errorMessage;
+                    
+                    return redirect()->route('admin.shipping-charges.all')
+                        ->with('error', $errorMessage)
+                        ->with('import_failed', true);
+                }
+                
+                // STEP 2: Only if there are NO errors, check if import was successful
+                // The import only happens if there are no errors (all-or-nothing approach)
+                // Note: importedCount includes both newly inserted and updated records
+                if ($import->importedCount > 0) {
+                    return redirect()->route('admin.shipping-charges.all')
+                        ->with('success', "✅ Bulk import completed successfully! {$import->importedCount} shipping charge(s) processed (inserted or updated).");
+                } else {
+                    // This should rarely happen, but handle it just in case
+                    return redirect()->route('admin.shipping-charges.all')
+                        ->with('error', 'No shipping charges were imported. Please check your file and try again.');
+                }
+            }
         } catch (\Exception $e) {
-            return redirect()->back()
-                ->with('error', 'Error importing Excel file: ' . $e->getMessage());
+            // Log the full exception for debugging
+            \Log::error('Shipping charges import error: ' . $e->getMessage(), [
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            // Check if this is an AJAX request
+            if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                $errorMessage = $e->getMessage();
+                // For production, provide user-friendly message; for development, include full details
+                if (config('app.debug')) {
+                    $errorMessage .= ' (File: ' . basename($e->getFile()) . ', Line: ' . $e->getLine() . ')';
+                }
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => $errorMessage,
+                    'errors' => [$errorMessage],
+                ], 500);
+            } else {
+                return redirect()->back()
+                    ->with('error', 'Error importing Excel file: ' . $e->getMessage());
+            }
         }
     }
 
@@ -263,29 +486,119 @@ trait ImportMethods
 
     public function downloadAwbUploadTemplate()
     {
+        // Row 1: Column headers with asterisks (*) for required fields
+        // Only includes fields that are in the create form
         $headers = [
-            '1', '1', '1', '1', '1', '1', '1', '1', '1', '1',
-            '1', '1', '1', '1', '1', '1', '1', '1', '1', '0',
-            '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
+            'branch *',
+            'hub *',
+            'awb_no *',
+            'type *',
+            'origin *',
+            'origin_zone *',
+            'origin_zone_pincode *',
+            'destination *',
+            'destination_zone *',
+            'destination_zone_pincode *',
+            'reference_no',
+            'date_of_sale',
+            'non_commercial',
+            'consignor *',
+            'consignor_attn *',
+            'consignee *',
+            'consignee_attn *',
+            'goods_type',
+            'pk *',
+            'actual_weight *',
+            'volumetric_weight *',
+            'chargeable_weight *',
+            'network_name *',
+            'service_name *',
+            'amour *',
+            'medical_shipment',
+            'invoice_value',
+            'invoice_date',
+            'is_coc',
+            'cod_amount',
+            'clearance_required',
+            'clearance_remark',
+            'status *',
+            'payment_deduct',
+            'location',
+            'forwarding_service',
+            'forwarding_number',
+            'transfer',
+            'transfer_on',
+            'remark_1',
+            'remark_2',
+            'remark_3',
         ];
 
-        $data = [
-            [
-                'awb_no', 'type', 'origin', 'origin_zone', 'origin_zone_pincode', 'destination', 'destination_zone',
-                'destination_zone_pincode', 'consignor', 'consignee', 'consignor_attn', 'consignee_attn', 'pk',
-                'actual_weight', 'volumetric_weight', 'chargeable_weight', 'network_name', 'service_name', 'amount',
-                'date_of_sale', 'goods_type', 'remark', 'forwardNumber', 'transfer', 'transferOn', 'remark_1',
-                'remark_2', 'remark_3', 'remark_4', 'remark_5'
-            ],
-            [
-                'AWB123456789', 'Domestic', 'India', 'Zone 1', '400001', 'United States', 'Zone 2', '10001',
-                'Haxo Shipping Pvt Ltd', 'John Doe', 'Ms. Anita', 'Mr. John', '1', '0.50', '0.65', '0.65',
-                'DTDC', 'Express', '150.00', '2025-01-15', 'Electronics', 'Handle with care', 'FW12345', 'No',
-                '2025-01-16', 'Remark 1', 'Remark 2', 'Remark 3', 'Remark 4', 'Remark 5'
-            ],
+        // Row 2: Sample data
+        $sampleRow = [
+            'Mumbai', // branch *
+            'Hub-001', // hub *
+            'AWB123456789', // awb_no *
+            'Domestic', // type *
+            'India', // origin *
+            'Zone 1', // origin_zone *
+            '400001', // origin_zone_pincode *
+            'United States', // destination *
+            'Zone 2', // destination_zone *
+            '10001', // destination_zone_pincode *
+            'AWB-972', // reference_no
+            '2025-01-15', // date_of_sale
+            'No', // non_commercial
+            'Haxo Shipping Pvt Ltd', // consignor *
+            'Ms. Anita', // consignor_attn *
+            'John Doe', // consignee *
+            'Mr. John', // consignee_attn *
+            'Electronics', // goods_type
+            '1', // pk *
+            '0.50', // actual_weight *
+            '0.65', // volumetric_weight *
+            '0.65', // chargeable_weight *
+            'DTDC', // network_name *
+            'Express', // service_name *
+            '150.00', // amour *
+            'No', // medical_shipment
+            '5000.00', // invoice_value
+            '2025-01-14', // invoice_date
+            '0', // is_coc
+            '0.00', // cod_amount
+            'Yes', // clearance_required
+            'Clearance approved', // clearance_remark
+            'publish', // status *
+            'No', // payment_deduct
+            'transit, Ex-Delhi', // location
+            'EKART', // forwarding_service
+            'FW12345', // forwarding_number
+            'John Smith', // transfer
+            '2025-01-16', // transfer_on
+            'Remark 1', // remark_1
+            'Remark 2', // remark_2
+            'Remark 3', // remark_3
         ];
 
-        return $this->downloadCsvTemplate($headers, $data, 'awb_upload_template.csv');
+        // Combine headers and sample data (no indicators row)
+        $data = [$headers, $sampleRow];
+
+        $export = new class($data) implements \Maatwebsite\Excel\Concerns\FromArray {
+            protected $data;
+            
+            public function __construct($data)
+            {
+                $this->data = $data;
+            }
+            
+            public function array(): array
+            {
+                return $this->data;
+            }
+        };
+        
+        $filename = 'awb_upload_template_' . date('Y-m-d') . '.xlsx';
+        
+        return \Maatwebsite\Excel\Facades\Excel::download($export, $filename);
     }
 
     public function importFormulas(Request $request)

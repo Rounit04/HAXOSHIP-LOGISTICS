@@ -8,6 +8,7 @@ use App\Http\Controllers\ErrorController;
 use App\Http\Controllers\FrontendController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Artisan;
 
 Route::get('/', [FrontendController::class, 'home'])->name('home');
 Route::view('/pricing', 'pricing')->name('pricing');
@@ -148,6 +149,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
         Route::get('/roles', [AdminController::class, 'roles'])->name('roles');
         Route::post('/roles/assign', [AdminController::class, 'assignRole'])->name('roles.assign');
         Route::post('/roles/create', [AdminController::class, 'createRole'])->name('roles.create');
+        Route::post('/roles/create-admin-user', [AdminController::class, 'createAdminUser'])->name('roles.create-admin-user');
         Route::get('/users/{id}/edit', [AdminController::class, 'editUser'])->name('users.edit');
         Route::put('/users/{id}', [AdminController::class, 'updateUser'])->name('users.update');
         Route::post('/users/{id}/verify', [AdminController::class, 'verifyUser'])->name('users.verify');
@@ -161,6 +163,8 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::get('/search-with-awb/search', [AdminController::class, 'searchAWB'])->name('search-with-awb.search');
     Route::post('/search-with-awb/search', [AdminController::class, 'searchAWB'])->name('search-with-awb.search.submit');
     Route::get('/search-with-awb/history', [AdminController::class, 'historyAWB'])->name('search-with-awb.history');
+    Route::delete('/search-with-awb/history/{id}', [AdminController::class, 'deleteHistoryEntry'])->name('search-with-awb.history.delete');
+    Route::get('/search-with-awb/awb-numbers', [AdminController::class, 'getAwbNumbers'])->name('search-with-awb.awb-numbers');
     Route::get('/networks', [AdminController::class, 'networks'])->name('networks');
     Route::get('/networks/create', [AdminController::class, 'createNetwork'])->name('networks.create');
     Route::get('/networks/all', [AdminController::class, 'allNetworks'])->name('networks.all');
@@ -208,6 +212,8 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::post('/zones/import', [AdminController::class, 'importZones'])->name('zones.import');
     Route::get('/zones/template/download', [AdminController::class, 'downloadZoneTemplate'])->name('zones.template.download');
     Route::get('/api/pincodes-by-country', [AdminController::class, 'getPincodesByCountry'])->name('api.pincodes-by-country');
+    Route::get('/api/zones-by-country', [AdminController::class, 'getZonesByCountry'])->name('api.zones-by-country');
+    Route::get('/api/pincodes-by-zone', [AdminController::class, 'getPincodesByZone'])->name('api.pincodes-by-zone');
     Route::get('/shipping-charges', [AdminController::class, 'shippingCharges'])->name('shipping-charges');
     Route::get('/shipping-charges/create', [AdminController::class, 'createShippingCharge'])->name('shipping-charges.create');
     Route::get('/shipping-charges/all', [AdminController::class, 'allShippingCharges'])->name('shipping-charges.all');
@@ -399,5 +405,53 @@ Route::get('/storage/{path}', function (string $path) {
 
     return response()->file($targetPath);
 })->where('path', '.*');
+
+/**
+ * Run migrations route (for deployment without SSH access)
+ * Access: /run-migrations?token=YOUR_SECRET_TOKEN
+ * Set MIGRATION_TOKEN in .env file for security
+ */
+Route::get('/run-migrations', function () {
+    // Check if token is provided and matches
+    $providedToken = request()->query('token');
+    $expectedToken = env('MIGRATION_TOKEN', 'change-this-secret-token-in-production');
+    
+    if (empty($providedToken) || $providedToken !== $expectedToken) {
+        return response()->json([
+            'error' => 'Unauthorized. Invalid or missing token.',
+            'message' => 'Please provide a valid token parameter.'
+        ], 401);
+    }
+    
+    // Only allow in production or if explicitly enabled
+    if (app()->environment('production') && $expectedToken === 'change-this-secret-token-in-production') {
+        return response()->json([
+            'error' => 'Security Error',
+            'message' => 'Please set a secure MIGRATION_TOKEN in your .env file before using this route in production.'
+        ], 403);
+    }
+    
+    try {
+        // Run migrations with force flag
+        Artisan::call('migrate', ['--force' => true]);
+        
+        $output = Artisan::output();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Migrations ran successfully!',
+            'output' => $output
+        ], 200);
+        
+    } catch (\Exception $e) {
+        \Log::error('Migration route error: ' . $e->getMessage());
+        
+        return response()->json([
+            'success' => false,
+            'error' => 'Migration failed',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+})->name('run-migrations');
 
 Route::fallback([ErrorController::class, 'notFound']);

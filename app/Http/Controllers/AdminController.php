@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\Role;
+use App\Models\Permission;
 use App\Models\FrontendSetting;
 use App\Models\Bank;
 use App\Models\BookingCategory;
@@ -43,11 +45,43 @@ use Carbon\Carbon;
 class AdminController extends Controller
 {
     use ImportMethods;
+    
+    /**
+     * Get the current logged-in admin user
+     */
+    protected function getCurrentAdminUser()
+    {
+        if (!session()->has('admin_logged_in') || !session('admin_user_id')) {
+            return null;
+        }
+        
+        return User::find(session('admin_user_id'));
+    }
+    
+    /**
+     * Check if current user has permission
+     */
+    protected function hasPermission($permissionSlug)
+    {
+        $user = $this->getCurrentAdminUser();
+        if (!$user) {
+            return false;
+        }
+        
+        return $user->hasPermission($permissionSlug);
+    }
+    
     public function dashboard()
     {
         // Ensure user is logged in (should be handled by middleware, but just in case)
         if (!session()->has('admin_logged_in') || session('admin_logged_in') !== true) {
             return redirect()->route('admin.login');
+        }
+        
+        // Check permission (super admin has all permissions)
+        $user = $this->getCurrentAdminUser();
+        if ($user && !$user->is_admin && !$user->hasPermission('view_dashboard')) {
+            return redirect()->route('admin.login')->with('error', 'You do not have permission to access the admin panel.');
         }
         
         $totalUsers = User::count();
@@ -400,13 +434,24 @@ class AdminController extends Controller
 
     public function roles()
     {
-        // Get all users without roles relationship (since we're using simple role assignment)
+        // Check permission
+        if (!$this->hasPermission('manage_roles')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
+        // Get all users
         $users = User::latest()->get();
-        $roles = ['Admin', 'Manager', 'Staff', 'User', 'Viewer']; // You can create a Role model later
+        
+        // Get all roles from database
+        $roles = Role::where('is_active', true)->latest()->get();
+        
+        // Get all permissions grouped by group
+        $permissions = Permission::orderBy('group')->orderBy('name')->get()->groupBy('group');
         
         return view('admin.roles', [
             'users' => $users,
             'roles' => $roles,
+            'permissions' => $permissions,
         ]);
     }
 
@@ -519,19 +564,98 @@ class AdminController extends Controller
 
     public function createRole(Request $request)
     {
+        // Check permission
+        if (!$this->hasPermission('manage_roles')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to perform this action.');
+        }
+        
         $request->validate([
             'role_name' => 'required|string|max:255',
             'permissions' => 'nullable|array',
         ]);
 
-        // Create role logic here
-        // You can create a Role model and permissions table later
+        // Create slug from role name
+        $slug = \Str::slug($request->role_name);
+        
+        // Check if role with same slug exists
+        if (Role::where('slug', $slug)->exists()) {
+            return back()->withErrors(['role_name' => 'A role with this name already exists.'])->withInput();
+        }
+
+        // Create role
+        $role = Role::create([
+            'name' => $request->role_name,
+            'slug' => $slug,
+            'description' => $request->description ?? null,
+            'is_active' => true,
+        ]);
+
+        // Attach permissions if provided
+        if ($request->has('permissions') && is_array($request->permissions)) {
+            $permissionIds = Permission::whereIn('slug', $request->permissions)->pluck('id');
+            $role->permissions()->attach($permissionIds);
+        }
 
         return back()->with('success', 'Role created successfully!');
+    }
+    
+    /**
+     * Create a new admin user with permissions
+     */
+    public function createAdminUser(Request $request)
+    {
+        // Check permission
+        if (!$this->hasPermission('manage_users')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to perform this action.');
+        }
+        
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|max:255|unique:users,email',
+            'password' => 'required|min:8|confirmed',
+            'permissions' => 'nullable|array',
+            'role_id' => 'nullable|exists:roles,id',
+        ]);
+
+        // Create user
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => \Hash::make($request->password),
+            'is_admin' => false, // Not super admin, but has permissions
+            'email_verified_at' => now(),
+        ]);
+
+        // Assign role if provided
+        if ($request->has('role_id') && $request->role_id) {
+            $role = Role::find($request->role_id);
+            if ($role) {
+                $user->roles()->attach($role->id);
+            }
+        }
+
+        // Attach direct permissions if provided
+        if ($request->has('permissions') && is_array($request->permissions) && count($request->permissions) > 0) {
+            $permissionIds = Permission::whereIn('slug', $request->permissions)->pluck('id');
+            $user->belongsToMany(Permission::class, 'user_permission')->attach($permissionIds);
+        } else {
+            // If no permissions selected, automatically give view_dashboard so they can at least login
+            $viewDashboardPermission = Permission::where('slug', 'view_dashboard')->first();
+            if ($viewDashboardPermission) {
+                $user->belongsToMany(Permission::class, 'user_permission')->attach($viewDashboardPermission->id);
+            }
+        }
+
+        return back()->with('success', 'Admin user created successfully! Email: ' . $user->email . '. They can now login with these credentials.');
     }
 
     public function rateCalculator()
     {
+        // Check permission
+        if (!$this->hasPermission('access_rate_calculator')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         $countries = $this->getCountries(true); // Get only active countries
         $shipmentTypes = ['Dox', 'Non-Dox', 'Medicine', 'Special'];
 
@@ -584,6 +708,61 @@ class AdminController extends Controller
         return response()->json([
             'success' => true,
             'data' => $result
+        ]);
+    }
+
+    public function getZonesByCountry(Request $request)
+    {
+        $countryName = $request->input('country');
+        
+        if (empty($countryName)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Country name is required'
+            ], 400);
+        }
+
+        $zones = $this->getZones(true); // Get only active zones
+        
+        // Filter zones by country
+        $countryZones = collect($zones)->filter(function($zone) use ($countryName) {
+            return ($zone['country'] ?? '') == $countryName;
+        });
+
+        // Get unique zone names
+        $uniqueZones = $countryZones->pluck('zone')->unique()->filter()->values()->toArray();
+
+        return response()->json([
+            'success' => true,
+            'data' => $uniqueZones
+        ]);
+    }
+
+    public function getPincodesByZone(Request $request)
+    {
+        $countryName = $request->input('country');
+        $zoneName = $request->input('zone');
+        
+        if (empty($countryName) || empty($zoneName)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Country and zone name are required'
+            ], 400);
+        }
+
+        $zones = $this->getZones(true); // Get only active zones
+        
+        // Filter zones by country and zone name
+        $filteredZones = collect($zones)->filter(function($zone) use ($countryName, $zoneName) {
+            return ($zone['country'] ?? '') == $countryName && ($zone['zone'] ?? '') == $zoneName;
+        });
+
+        // Get unique pincodes
+        $uniquePincodes = $filteredZones->pluck('pincode')->unique()->filter()->values()->toArray();
+
+        return response()->json([
+            'success' => true,
+            'data' => $uniquePincodes
         ]);
     }
 
@@ -993,6 +1172,11 @@ class AdminController extends Controller
 
     public function networks()
     {
+        // Check permission
+        if (!$this->hasPermission('view_networks')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         // Redirect to create network by default
         return redirect()->route('admin.networks.create');
     }
@@ -1767,6 +1951,11 @@ class AdminController extends Controller
 
     public function services()
     {
+        // Check permission
+        if (!$this->hasPermission('view_services')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return redirect()->route('admin.services.create');
     }
 
@@ -1782,38 +1971,57 @@ class AdminController extends Controller
 
     public function allServices(Request $request)
     {
-        $services = $this->getServices();
-        $networks = $this->getNetworks(true); // Get only active networks for filtering
-        
-        // Filter services to only show those whose network exists and is active
-        $networkNames = collect($networks)->pluck('name')->toArray();
-        $services = array_filter($services, function($service) use ($networkNames) {
-            return in_array($service['network'] ?? '', $networkNames);
-        });
+        // Get services directly from database first
+        $query = \App\Models\Service::query();
         
         // Apply search filter
         if ($request->filled('search')) {
-            $searchTerm = strtolower($request->search);
-            $services = array_filter($services, function($service) use ($searchTerm) {
-                return strpos(strtolower($service['name'] ?? ''), $searchTerm) !== false;
-            });
+            $query->where('name', 'like', '%' . $request->search . '%');
         }
         
         // Apply network filter
         if ($request->filled('network')) {
-            $networkFilter = $request->network;
-            $services = array_filter($services, function($service) use ($networkFilter) {
-                return ($service['network'] ?? '') == $networkFilter;
-            });
+            $query->where('network', $request->network);
         }
         
         // Apply status filter
         if ($request->filled('status')) {
-            $statusFilter = $request->status;
-            $services = array_filter($services, function($service) use ($statusFilter) {
-                return ($service['status'] ?? '') == $statusFilter;
-            });
+            $query->where('status', $request->status);
         }
+        
+        // Get services from database
+        $dbServices = $query->orderBy('name', 'asc')->get();
+        
+        // Convert to array format for backward compatibility
+        $services = [];
+        if ($dbServices->isNotEmpty()) {
+            $services = $dbServices->map(function($service) {
+                return [
+                    'id' => $service->id,
+                    'name' => $service->name,
+                    'network' => $service->network,
+                    'transit_time' => $service->transit_time,
+                    'items_allowed' => $service->items_allowed,
+                    'status' => $service->status,
+                    'remark' => $service->remark,
+                    'display_title' => $service->display_title,
+                    'description' => $service->description,
+                    'icon_type' => $service->icon_type,
+                    'is_highlighted' => $service->is_highlighted,
+                    'created_at' => $service->created_at ? $service->created_at->toDateTimeString() : now()->toDateTimeString(),
+                ];
+            })->toArray();
+        } else {
+            // Fallback to session if database is empty
+            $services = $this->getServices();
+        }
+        
+        // Filter services to only show those whose network exists and is active
+        $networks = $this->getNetworks(true); // Get only active networks for filtering
+        $networkNames = collect($networks)->pluck('name')->toArray();
+        $services = array_filter($services, function($service) use ($networkNames) {
+            return in_array($service['network'] ?? '', $networkNames);
+            });
         
         // Re-index array after filtering
         $services = array_values($services);
@@ -1956,7 +2164,8 @@ class AdminController extends Controller
             ]);
         }
 
-        return redirect()->route('admin.services.all')->with('success', 'Service created successfully!');
+        return redirect()->route('admin.services.all')
+            ->with('success', '✅ Service "' . $request->service_name . '" created successfully! The service has been added to the list.');
     }
 
     public function updateService(Request $request, $id)
@@ -2225,7 +2434,24 @@ class AdminController extends Controller
     {
         try {
             // Try to delete from database first
-            \App\Models\Service::findOrFail($id)->delete();
+            $service = \App\Models\Service::findOrFail($id);
+            $serviceName = $service->name;
+            $deleted = $service->delete();
+            
+            if ($deleted) {
+                // Also remove from session for backward compatibility
+                $services = $this->getServices();
+                if (is_array($services)) {
+                    $services = array_filter($services, function($service) use ($id) {
+                        return (int)($service['id'] ?? 0) != (int)$id;
+                    });
+                    session(['services' => array_values($services)]);
+                    session()->save();
+                }
+                
+                return redirect()->route('admin.services.all')
+                    ->with('success', 'Service "' . $serviceName . '" deleted successfully!');
+            }
         } catch (\Exception $e) {
             // Fallback to session if database fails
             $services = $this->getServices();
@@ -2235,6 +2461,8 @@ class AdminController extends Controller
             
             // Convert ID to integer for proper comparison
             $id = (int)$id;
+            $serviceToDelete = collect($services)->firstWhere('id', $id);
+            $serviceName = $serviceToDelete['name'] ?? 'Service';
             
             $services = array_filter($services, function($service) use ($id) {
                 return (int)($service['id'] ?? 0) != $id;
@@ -2242,9 +2470,13 @@ class AdminController extends Controller
             
             session(['services' => array_values($services)]);
             session()->save();
+            
+            return redirect()->route('admin.services.all')
+                ->with('success', 'Service "' . $serviceName . '" deleted successfully!');
         }
         
-        return redirect()->route('admin.services.all')->with('success', 'Service deleted successfully!');
+        return redirect()->route('admin.services.all')
+            ->with('error', 'Service not found or could not be deleted.');
     }
 
     /**
@@ -2259,20 +2491,20 @@ class AdminController extends Controller
 
         try {
             $ids = $request->selected_ids;
-            $services = $this->getServices();
-            if (!is_array($services)) {
-                $services = [];
-            }
             
-            // Filter out selected services
+            // Delete from database first
+            $deletedCount = \App\Models\Service::whereIn('id', $ids)->delete();
+            
+            // Also remove from session for backward compatibility
+            $services = $this->getServices();
+            if (is_array($services)) {
             $services = array_filter($services, function($service) use ($ids) {
                 return !in_array($service['id'], $ids);
             });
-            
             session(['services' => array_values($services)]);
             session()->save();
+            }
             
-            $deletedCount = count($ids);
             return redirect()->route('admin.services.all')
                 ->with('success', "Successfully deleted {$deletedCount} service(s).");
                 
@@ -2344,6 +2576,11 @@ class AdminController extends Controller
 
     public function countries()
     {
+        // Check permission
+        if (!$this->hasPermission('view_countries')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return redirect()->route('admin.countries.create');
     }
 
@@ -2594,9 +2831,26 @@ class AdminController extends Controller
 
     public function deleteCountry($id)
     {
-        // Try to delete from database first
         try {
-            \App\Models\Country::findOrFail($id)->delete();
+        // Try to delete from database first
+            $country = \App\Models\Country::findOrFail($id);
+            $countryName = $country->name;
+            $deleted = $country->delete();
+            
+            if ($deleted) {
+                // Also remove from session for backward compatibility
+                $countries = $this->getCountries();
+                if (is_array($countries)) {
+                    $countries = array_filter($countries, function($country) use ($id) {
+                        return (int)($country['id'] ?? 0) != (int)$id;
+                    });
+                    session(['countries' => array_values($countries)]);
+                    session()->save();
+                }
+                
+                return redirect()->route('admin.countries.all')
+                    ->with('success', 'Country "' . $countryName . '" deleted successfully!');
+            }
         } catch (\Exception $e) {
             // Fallback to session if database fails
             $countries = $this->getCountries();
@@ -2604,15 +2858,24 @@ class AdminController extends Controller
                 $countries = [];
             }
             
+            // Convert ID to integer for proper comparison
+            $id = (int)$id;
+            $countryToDelete = collect($countries)->firstWhere('id', $id);
+            $countryName = $countryToDelete['name'] ?? 'Country';
+            
             $countries = array_filter($countries, function($country) use ($id) {
-                return $country['id'] != $id;
+                return (int)($country['id'] ?? 0) != $id;
             });
             
             session(['countries' => array_values($countries)]);
             session()->save();
+            
+            return redirect()->route('admin.countries.all')
+                ->with('success', 'Country "' . $countryName . '" deleted successfully!');
         }
         
-        return redirect()->route('admin.countries.all')->with('success', 'Country deleted successfully!');
+        return redirect()->route('admin.countries.all')
+            ->with('error', 'Country not found or could not be deleted.');
     }
 
     /**
@@ -2627,20 +2890,20 @@ class AdminController extends Controller
 
         try {
             $ids = $request->selected_ids;
-            $countries = $this->getCountries();
-            if (!is_array($countries)) {
-                $countries = [];
-            }
             
-            // Filter out selected countries
+            // Delete from database first
+            $deletedCount = \App\Models\Country::whereIn('id', $ids)->delete();
+            
+            // Also remove from session for backward compatibility
+            $countries = $this->getCountries();
+            if (is_array($countries)) {
             $countries = array_filter($countries, function($country) use ($ids) {
                 return !in_array($country['id'], $ids);
             });
-            
             session(['countries' => array_values($countries)]);
             session()->save();
+            }
             
-            $deletedCount = count($ids);
             return redirect()->route('admin.countries.all')
                 ->with('success', "Successfully deleted {$deletedCount} country/countries.");
                 
@@ -2653,13 +2916,17 @@ class AdminController extends Controller
     // Zones Management
     private function getZones($activeOnly = false)
     {
-        // Try to get from database first
-        $dbZones = \App\Models\Zone::orderBy('pincode', 'asc')->get();
+        // Try to get from database first - explicitly fetch ALL zones without any limits
+        $dbZones = \App\Models\Zone::orderBy('pincode', 'asc')
+            ->orderBy('id', 'asc')
+            ->get();
         
         if ($dbZones->isNotEmpty()) {
             // Convert to array format for backward compatibility
-            $zones = $dbZones->map(function($zone) {
-                return [
+            // Ensure all zones are converted, not just a subset
+            $zones = [];
+            foreach ($dbZones as $zone) {
+                $zones[] = [
                     'id' => $zone->id,
                     'pincode' => $zone->pincode,
                     'country' => $zone->country,
@@ -2670,7 +2937,7 @@ class AdminController extends Controller
                     'remark' => $zone->remark,
                     'created_at' => $zone->created_at ? $zone->created_at->toDateTimeString() : now()->toDateTimeString(),
                 ];
-            })->toArray();
+            }
         } else {
             // Fallback to session if database is empty
             if (session()->has('zones')) {
@@ -2729,6 +2996,11 @@ class AdminController extends Controller
 
     public function zones()
     {
+        // Check permission
+        if (!$this->hasPermission('view_zones')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return redirect()->route('admin.zones.create');
     }
 
@@ -2751,16 +3023,13 @@ class AdminController extends Controller
     public function allZones(Request $request)
     {
         $zones = $this->getZones();
-        $networks = $this->getNetworks(true); // Get only active networks for filtering
-        $services = $this->getServices(true); // Get only active services for filtering
+        $networks = $this->getNetworks(true); // Get only active networks for filtering dropdown
+        $countries = $this->getCountries(true); // Get only active countries for filtering dropdown
+        $services = $this->getServices(true); // Get only active services for filtering dropdown
         
-        // Filter zones to only show those with existing active networks and services
-        $networkNames = collect($networks)->pluck('name')->toArray();
-        $serviceNames = collect($services)->pluck('name')->toArray();
-        $zones = array_filter($zones, function($zone) use ($networkNames, $serviceNames) {
-            return in_array($zone['network'] ?? '', $networkNames) &&
-                   in_array($zone['service'] ?? '', $serviceNames);
-        });
+        // Show all zones without filtering by network/service existence
+        // This ensures all imported zones are displayed, regardless of network/service status
+        // Users can still filter manually using the search and filter options
         
         // Apply search filter
         if ($request->filled('search')) {
@@ -2778,6 +3047,14 @@ class AdminController extends Controller
             });
         }
         
+        // Apply country filter
+        if ($request->filled('country')) {
+            $countryFilter = $request->country;
+            $zones = array_filter($zones, function($zone) use ($countryFilter) {
+                return ($zone['country'] ?? '') == $countryFilter;
+            });
+        }
+        
         // Apply status filter
         if ($request->filled('status')) {
             $statusFilter = $request->status;
@@ -2786,15 +3063,20 @@ class AdminController extends Controller
             });
         }
         
-        // Re-index array after filtering
+        // Re-index array after filtering to ensure proper sequential indexing
         $zones = array_values($zones);
+        
+        // Ensure we have all zones - no limits applied
+        // The zones array should contain all imported zones from the database
         
         return view('admin.zones.all', [
             'zones' => $zones,
             'networks' => $networks,
+            'countries' => $countries,
             'searchParams' => [
                 'search' => $request->search ?? '',
                 'network' => $request->network ?? '',
+                'country' => $request->country ?? '',
                 'status' => $request->status ?? '',
             ],
         ]);
@@ -2878,10 +3160,13 @@ class AdminController extends Controller
             $zones = [];
         }
         
-        // Check if zone with same pincode already exists - update it instead of creating new
+        // Check if zone with same pincode, network, and service already exists - update it instead of creating new
+        // This allows multiple services from the same network to have different zones for the same pincode
         $existingZoneIndex = null;
         foreach ($zones as $index => $zone) {
-            if (strcasecmp($zone['pincode'] ?? '', $request->pincode) === 0) {
+            if (strcasecmp($zone['pincode'] ?? '', $request->pincode) === 0 &&
+                strcasecmp($zone['network'] ?? '', $request->network) === 0 &&
+                strcasecmp($zone['service'] ?? '', $request->service) === 0) {
                 $existingZoneIndex = $index;
                 break;
             }
@@ -2893,22 +3178,24 @@ class AdminController extends Controller
 
         // Save to database
         try {
-            // Check if zone with same pincode exists
-            $existingZone = \App\Models\Zone::where('pincode', $request->pincode)->first();
+            // Check if zone with same pincode, network, and service exists
+            // This allows multiple services from the same network to have different zones for the same pincode
+            $existingZone = \App\Models\Zone::where('pincode', $request->pincode)
+                ->where('network', $request->network)
+                ->where('service', $request->service)
+                ->first();
             
             if ($existingZone) {
                 // Update existing zone
                 $existingZone->update([
                     'country' => $request->country,
                     'zone' => $request->zone,
-                    'network' => $request->network,
-                    'service' => $request->service,
                     'status' => $status,
                     'remark' => $request->remark ?? '',
                 ]);
-                $message = 'Zone updated successfully! (Pincode already existed)';
+                $message = 'Zone updated successfully! (Zone with same pincode, network, and service already existed)';
             } else {
-                // Create new zone
+                // Create new zone (allows same pincode with different network/service combinations)
                 \App\Models\Zone::create([
                     'pincode' => $request->pincode,
                     'country' => $request->country,
@@ -2937,7 +3224,7 @@ class AdminController extends Controller
                     'created_at' => $existingZone['created_at'] ?? now()->toDateTimeString(),
                     'updated_at' => now()->toDateTimeString(),
                 ];
-                $message = 'Zone updated successfully! (Pincode already existed)';
+                $message = 'Zone updated successfully! (Zone with same pincode, network, and service already existed)';
             } else {
                 // Create new zone
                 $newId = count($zones) > 0 ? max(array_column($zones, 'id')) + 1 : 1;
@@ -3067,7 +3354,18 @@ class AdminController extends Controller
     {
         // Try to delete from database first
         try {
-            \App\Models\Zone::findOrFail($id)->delete();
+            $zone = \App\Models\Zone::findOrFail($id);
+            $zone->delete();
+            
+            // Also remove from session for backward compatibility
+            $zones = $this->getZones();
+            if (is_array($zones)) {
+                $zones = array_filter($zones, function($zone) use ($id) {
+                    return (int)($zone['id'] ?? 0) != (int)$id;
+                });
+                session(['zones' => array_values($zones)]);
+                session()->save();
+            }
         } catch (\Exception $e) {
             // Fallback to session if database fails
             $zones = $this->getZones();
@@ -3076,7 +3374,7 @@ class AdminController extends Controller
             }
             
             $zones = array_filter($zones, function($zone) use ($id) {
-                return $zone['id'] != $id;
+                return (int)($zone['id'] ?? 0) != (int)$id;
             });
             
             session(['zones' => array_values($zones)]);
@@ -3096,8 +3394,24 @@ class AdminController extends Controller
             'selected_ids.*' => 'required|integer',
         ]);
 
+        $ids = $request->selected_ids;
+        $deletedCount = 0;
+
+        // Try to delete from database first
         try {
-            $ids = $request->selected_ids;
+            $deletedCount = \App\Models\Zone::whereIn('id', $ids)->delete();
+            
+            // Also remove from session for backward compatibility
+            $zones = $this->getZones();
+            if (is_array($zones)) {
+                $zones = array_filter($zones, function($zone) use ($ids) {
+                    return !in_array($zone['id'], $ids);
+                });
+                session(['zones' => array_values($zones)]);
+                session()->save();
+            }
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
             $zones = $this->getZones();
             if (!is_array($zones)) {
                 $zones = [];
@@ -3112,55 +3426,110 @@ class AdminController extends Controller
             session()->save();
             
             $deletedCount = count($ids);
+        }
+        
+        if ($deletedCount > 0) {
             return redirect()->route('admin.zones.all')
                 ->with('success', "Successfully deleted {$deletedCount} zone(s).");
-                
-        } catch (\Exception $e) {
+        } else {
             return redirect()->back()
-                ->with('error', 'Error deleting zones: ' . $e->getMessage());
+                ->with('error', 'No zones were deleted. Please try again.');
         }
     }
 
     // Shipping Charges Management
     private function getShippingCharges()
     {
-        if (session()->has('shipping_charges')) {
-            return session('shipping_charges');
+        // Try to get from database first
+        try {
+            $charges = \App\Models\ShippingCharge::all()->toArray();
+            
+            // Convert to the format expected by the rest of the code
+            $formattedCharges = array_map(function($charge) {
+                return [
+                    'id' => $charge['id'],
+                    'origin' => $charge['origin'],
+                    'origin_zone' => $charge['origin_zone'],
+                    'destination' => $charge['destination'],
+                    'destination_zone' => $charge['destination_zone'],
+                    'shipment_type' => $charge['shipment_type'],
+                    'min_weight' => (float)$charge['min_weight'],
+                    'max_weight' => (float)$charge['max_weight'],
+                    'network' => $charge['network'],
+                    'service' => $charge['service'],
+                    'rate' => (float)$charge['rate'],
+                    'remark' => $charge['remark'] ?? '',
+                    'created_at' => $charge['created_at'] ?? now()->toDateTimeString(),
+                    'updated_at' => $charge['updated_at'] ?? null,
+                ];
+            }, $charges);
+            
+            // If database is empty, check session for backward compatibility
+            if (empty($formattedCharges) && session()->has('shipping_charges')) {
+                $sessionCharges = session('shipping_charges');
+                if (is_array($sessionCharges) && !empty($sessionCharges)) {
+                    // Migrate session data to database
+                    $this->migrateSessionToDatabase($sessionCharges);
+                    // Return the migrated data
+                    return $this->getShippingCharges(); // Recursive call to get from database
+                }
+            }
+            
+            return $formattedCharges;
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            if (session()->has('shipping_charges')) {
+                return session('shipping_charges');
+            }
+            
+            // Return empty array if both database and session fail
+            return [];
         }
-        
-        $defaultCharges = [
-            [
-                'id' => 1,
-                'origin' => 'India',
-                'origin_zone' => 'Zone 1',
-                'destination' => 'India',
-                'destination_zone' => 'Zone 2',
-                'shipment_type' => 'Dox',
-                'min_weight' => 0.01,
-                'max_weight' => 5.0,
-                'network' => 'DTDC',
-                'service' => 'Express',
-                'rate' => 100.00,
-                'remark' => 'Delhi to Mumbai',
-            ],
-            [
-                'id' => 2,
-                'origin' => 'India',
-                'origin_zone' => 'Zone 2',
-                'destination' => 'United States',
-                'destination_zone' => 'Remote',
-                'shipment_type' => 'Non-Dox',
-                'min_weight' => 5.0,
-                'max_weight' => 10.0,
-                'network' => 'Blue Dart',
-                'service' => 'Economy',
-                'rate' => 500.00,
-                'remark' => 'Mumbai to US',
-            ],
-        ];
-        
-        session(['shipping_charges' => $defaultCharges]);
-        return $defaultCharges;
+    }
+    
+    /**
+     * Migrate session data to database (one-time migration)
+     */
+    private function migrateSessionToDatabase($sessionCharges)
+    {
+        try {
+            \DB::beginTransaction();
+            foreach ($sessionCharges as $charge) {
+                // Check if already exists in database
+                $exists = \App\Models\ShippingCharge::where('origin', $charge['origin'] ?? '')
+                    ->where('destination', $charge['destination'] ?? '')
+                    ->where('origin_zone', $charge['origin_zone'] ?? '')
+                    ->where('destination_zone', $charge['destination_zone'] ?? '')
+                    ->where('network', $charge['network'] ?? '')
+                    ->where('service', $charge['service'] ?? '')
+                    ->exists();
+                
+                if (!$exists) {
+                    \App\Models\ShippingCharge::create([
+                        'origin' => $charge['origin'] ?? '',
+                        'origin_zone' => $charge['origin_zone'] ?? '',
+                        'destination' => $charge['destination'] ?? '',
+                        'destination_zone' => $charge['destination_zone'] ?? '',
+                        'shipment_type' => $charge['shipment_type'] ?? 'Dox',
+                        'min_weight' => $charge['min_weight'] ?? 0.01,
+                        'max_weight' => $charge['max_weight'] ?? 5.0,
+                        'network' => $charge['network'] ?? '',
+                        'service' => $charge['service'] ?? '',
+                        'rate' => $charge['rate'] ?? 0,
+                        'remark' => $charge['remark'] ?? '',
+                        'created_at' => $charge['created_at'] ?? now(),
+                    ]);
+                }
+            }
+            \DB::commit();
+            
+            // Clear session after successful migration
+            session()->forget('shipping_charges');
+        } catch (\Exception $e) {
+            \DB::rollBack();
+            // Log error but don't throw - allow fallback to session
+            \Log::error('Failed to migrate shipping charges from session to database: ' . $e->getMessage());
+        }
     }
 
     private function getShipmentTypes()
@@ -3362,30 +3731,28 @@ class AdminController extends Controller
             return redirect()->back()->withInput()->with('error', 'Destination country does not exist. Please create the country first.');
         }
 
-        $shippingCharges = $this->getShippingCharges();
-        if (!is_array($shippingCharges)) {
-            $shippingCharges = [];
-        }
-        
         // Check if shipping charge with same origin, destination, zones, network, service already exists - update it
-        $existingChargeIndex = null;
-        foreach ($shippingCharges as $index => $charge) {
-            if (strcasecmp($charge['origin'] ?? '', $request->origin) === 0 &&
-                strcasecmp($charge['destination'] ?? '', $request->destination) === 0 &&
-                strcasecmp($charge['origin_zone'] ?? '', $request->origin_zone) === 0 &&
-                strcasecmp($charge['destination_zone'] ?? '', $request->destination_zone) === 0 &&
-                strcasecmp($charge['network'] ?? '', $request->network) === 0 &&
-                strcasecmp($charge['service'] ?? '', $request->service) === 0) {
-                $existingChargeIndex = $index;
-                break;
-            }
-        }
+        $existingCharge = \App\Models\ShippingCharge::where('origin', $request->origin)
+            ->where('destination', $request->destination)
+            ->where('origin_zone', $request->origin_zone)
+            ->where('destination_zone', $request->destination_zone)
+            ->where('network', $request->network)
+            ->where('service', $request->service)
+            ->first();
 
-        if ($existingChargeIndex !== null) {
+        if ($existingCharge) {
             // Update existing charge
-            $existingCharge = $shippingCharges[$existingChargeIndex];
-            $shippingCharges[$existingChargeIndex] = [
-                'id' => $existingCharge['id'],
+            $existingCharge->update([
+                'shipment_type' => $request->shipment_type,
+                'min_weight' => $request->min_weight,
+                'max_weight' => $request->max_weight,
+                'rate' => $request->rate,
+                'remark' => $request->remark ?? '',
+            ]);
+            $message = 'Shipping charge updated successfully! (Existing record found)';
+        } else {
+            // Create new charge
+            \App\Models\ShippingCharge::create([
                 'origin' => $request->origin,
                 'origin_zone' => $request->origin_zone,
                 'destination' => $request->destination,
@@ -3397,34 +3764,9 @@ class AdminController extends Controller
                 'service' => $request->service,
                 'rate' => $request->rate,
                 'remark' => $request->remark ?? '',
-                'created_at' => $existingCharge['created_at'] ?? now()->toDateTimeString(),
-                'updated_at' => now()->toDateTimeString(),
-            ];
-            $message = 'Shipping charge updated successfully! (Existing record found)';
-        } else {
-            // Create new charge
-            $newId = count($shippingCharges) > 0 ? max(array_column($shippingCharges, 'id')) + 1 : 1;
-        $newCharge = [
-            'id' => $newId,
-            'origin' => $request->origin,
-            'origin_zone' => $request->origin_zone,
-            'destination' => $request->destination,
-            'destination_zone' => $request->destination_zone,
-            'shipment_type' => $request->shipment_type,
-            'min_weight' => $request->min_weight,
-            'max_weight' => $request->max_weight,
-            'network' => $request->network,
-            'service' => $request->service,
-            'rate' => $request->rate,
-            'remark' => $request->remark ?? '',
-            'created_at' => now()->toDateTimeString(),
-        ];
-        $shippingCharges[] = $newCharge;
+            ]);
             $message = 'Shipping charge created successfully!';
         }
-        
-        session(['shipping_charges' => $shippingCharges]);
-        session()->save();
 
         // Return JSON response for AJAX requests
         if ($request->ajax() || $request->wantsJson()) {
@@ -3502,34 +3844,53 @@ class AdminController extends Controller
             return redirect()->back()->withInput()->with('error', 'Destination country does not exist. Please create the country first.');
         }
 
-        $shippingCharges = $this->getShippingCharges();
-        if (!is_array($shippingCharges)) {
-            $shippingCharges = [];
-        }
-        
-        $shippingCharges = array_map(function($charge) use ($id, $request) {
-            if ($charge['id'] == $id) {
-                return [
-                    'id' => $id,
-                    'origin' => $request->origin,
-                    'origin_zone' => $request->origin_zone,
-                    'destination' => $request->destination,
-                    'destination_zone' => $request->destination_zone,
-                    'shipment_type' => $request->shipment_type,
-                    'min_weight' => $request->min_weight,
-                    'max_weight' => $request->max_weight,
-                    'network' => $request->network,
-                    'service' => $request->service,
-                    'rate' => $request->rate,
-                    'remark' => $request->remark ?? '',
-                    'created_at' => $charge['created_at'] ?? now()->toDateTimeString(),
-                ];
+        // Update in database
+        try {
+            $charge = \App\Models\ShippingCharge::findOrFail($id);
+            $charge->update([
+                'origin' => $request->origin,
+                'origin_zone' => $request->origin_zone,
+                'destination' => $request->destination,
+                'destination_zone' => $request->destination_zone,
+                'shipment_type' => $request->shipment_type,
+                'min_weight' => $request->min_weight,
+                'max_weight' => $request->max_weight,
+                'network' => $request->network,
+                'service' => $request->service,
+                'rate' => $request->rate,
+                'remark' => $request->remark ?? '',
+            ]);
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $shippingCharges = $this->getShippingCharges();
+            if (!is_array($shippingCharges)) {
+                $shippingCharges = [];
             }
-            return $charge;
-        }, $shippingCharges);
-        
-        session(['shipping_charges' => array_values($shippingCharges)]);
-        session()->save();
+            
+            $shippingCharges = array_map(function($charge) use ($id, $request) {
+                if ($charge['id'] == $id) {
+                    return [
+                        'id' => $id,
+                        'origin' => $request->origin,
+                        'origin_zone' => $request->origin_zone,
+                        'destination' => $request->destination,
+                        'destination_zone' => $request->destination_zone,
+                        'shipment_type' => $request->shipment_type,
+                        'min_weight' => $request->min_weight,
+                        'max_weight' => $request->max_weight,
+                        'network' => $request->network,
+                        'service' => $request->service,
+                        'rate' => $request->rate,
+                        'remark' => $request->remark ?? '',
+                        'created_at' => $charge['created_at'] ?? now()->toDateTimeString(),
+                    ];
+                }
+                return $charge;
+            }, $shippingCharges);
+            
+            session(['shipping_charges' => array_values($shippingCharges)]);
+            session()->save();
+        }
 
         // Return JSON response for AJAX requests
         if ($request->ajax() || $request->wantsJson()) {
@@ -3545,17 +3906,24 @@ class AdminController extends Controller
 
     public function deleteShippingCharge($id)
     {
-        $shippingCharges = $this->getShippingCharges();
-        if (!is_array($shippingCharges)) {
-            $shippingCharges = [];
+        try {
+            // Delete from database
+            $charge = \App\Models\ShippingCharge::findOrFail($id);
+            $charge->delete();
+        } catch (\Exception $e) {
+            // Fallback to session if database fails
+            $shippingCharges = $this->getShippingCharges();
+            if (!is_array($shippingCharges)) {
+                $shippingCharges = [];
+            }
+            
+            $shippingCharges = array_filter($shippingCharges, function($charge) use ($id) {
+                return $charge['id'] != $id;
+            });
+            
+            session(['shipping_charges' => array_values($shippingCharges)]);
+            session()->save();
         }
-        
-        $shippingCharges = array_filter($shippingCharges, function($charge) use ($id) {
-            return $charge['id'] != $id;
-        });
-        
-        session(['shipping_charges' => array_values($shippingCharges)]);
-        session()->save();
         
         return redirect()->route('admin.shipping-charges.all')->with('success', 'Shipping charge deleted successfully!');
     }
@@ -3572,26 +3940,37 @@ class AdminController extends Controller
 
         try {
             $ids = $request->selected_ids;
-            $shippingCharges = $this->getShippingCharges();
-            if (!is_array($shippingCharges)) {
-                $shippingCharges = [];
-            }
             
-            // Filter out selected shipping charges
-            $shippingCharges = array_filter($shippingCharges, function($charge) use ($ids) {
-                return !in_array($charge['id'], $ids);
-            });
+            // Delete from database
+            $deletedCount = \App\Models\ShippingCharge::whereIn('id', $ids)->delete();
             
-            session(['shipping_charges' => array_values($shippingCharges)]);
-            session()->save();
-            
-            $deletedCount = count($ids);
             return redirect()->route('admin.shipping-charges.all')
                 ->with('success', "Successfully deleted {$deletedCount} shipping charge(s).");
                 
         } catch (\Exception $e) {
-            return redirect()->back()
-                ->with('error', 'Error deleting shipping charges: ' . $e->getMessage());
+            // Fallback to session if database fails
+            try {
+                $ids = $request->selected_ids;
+                $shippingCharges = $this->getShippingCharges();
+                if (!is_array($shippingCharges)) {
+                    $shippingCharges = [];
+                }
+                
+                // Filter out selected shipping charges
+                $shippingCharges = array_filter($shippingCharges, function($charge) use ($ids) {
+                    return !in_array($charge['id'], $ids);
+                });
+                
+                session(['shipping_charges' => array_values($shippingCharges)]);
+                session()->save();
+                
+                $deletedCount = count($ids);
+                return redirect()->route('admin.shipping-charges.all')
+                    ->with('success', "Successfully deleted {$deletedCount} shipping charge(s).");
+            } catch (\Exception $e2) {
+                return redirect()->back()
+                    ->with('error', 'Error deleting shipping charges: ' . $e2->getMessage());
+            }
         }
     }
 
@@ -4197,6 +4576,11 @@ class AdminController extends Controller
 
     public function searchWithAwb()
     {
+        // Check permission
+        if (!$this->hasPermission('search_awb')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return redirect()->route('admin.search-with-awb.search');
     }
 
@@ -4374,12 +4758,61 @@ class AdminController extends Controller
         ]);
     }
 
+    public function getAwbNumbers(Request $request)
+    {
+        $search = $request->input('search', '');
+        
+        $query = \App\Models\AwbUpload::select('awb_no', 'branch', 'date_of_sale', 'status')
+            ->orderBy('awb_no', 'asc');
+        
+        if ($search) {
+            $query->where('awb_no', 'like', '%' . $search . '%');
+        }
+        
+        $awbNumbers = $query->limit(100)->get()->map(function($awb) {
+            return [
+                'awb_no' => $awb->awb_no,
+                'branch' => $awb->branch,
+                'date_of_sale' => $awb->date_of_sale ? $awb->date_of_sale->format('Y-m-d') : null,
+                'status' => $awb->status,
+            ];
+        });
+        
+        return response()->json($awbNumbers);
+    }
+
     public function historyAWB()
     {
+        // Force cleanup before getting history - check database directly
+        $this->forceCleanupHistory();
+        
         $history = $this->getHistory();
+        
         return view('admin.search-with-awb.history', [
             'history' => $history,
         ]);
+    }
+
+    public function deleteHistoryEntry($id)
+    {
+        $history = $this->getHistory();
+        
+        if (!is_array($history)) {
+            return redirect()->route('admin.search-with-awb.history')
+                ->with('error', 'History entry not found.');
+        }
+        
+        // Find and remove the entry by ID
+        $history = array_filter($history, function($item) use ($id) {
+            return isset($item['id']) && (int)$item['id'] !== (int)$id;
+        });
+        
+        // Save cleaned history back to session
+        session(['awb_history' => array_values($history)]);
+        session()->save();
+        
+        return redirect()->route('admin.search-with-awb.history')
+            ->with('success', 'History entry deleted successfully!');
     }
 
     private function addToHistory($awb)
@@ -4428,6 +4861,153 @@ class AdminController extends Controller
             return session('awb_history');
         }
         return [];
+    }
+
+    /**
+     * Remove history entries for a deleted AWB
+     * @param int|null $id AWB ID (for session-based AWBs)
+     * @param string|null $awbNo AWB Number (for database AWBs)
+     */
+    private function removeFromHistory($id = null, $awbNo = null)
+    {
+        $history = $this->getHistory();
+        if (!is_array($history)) {
+            $history = [];
+        }
+        
+        // Filter out history entries matching the deleted AWB
+        $history = array_filter($history, function($item) use ($id, $awbNo) {
+            // Remove if ID matches (for session-based AWBs)
+            if ($id !== null && isset($item['id']) && (int)$item['id'] == (int)$id) {
+                return false;
+            }
+            // Remove if AWB number matches (for database AWBs) - case insensitive
+            if ($awbNo !== null && isset($item['awb_no'])) {
+                $itemAwbNo = strtoupper(trim($item['awb_no']));
+                $compareAwbNo = strtoupper(trim($awbNo));
+                if ($itemAwbNo === $compareAwbNo) {
+                    return false;
+                }
+            }
+            return true;
+        });
+        
+        // Save cleaned history back to session and force save
+        $cleanedHistory = array_values($history);
+        session(['awb_history' => $cleanedHistory]);
+        session()->save();
+        
+        // Also verify against database to ensure no orphaned entries remain
+        if (!empty($cleanedHistory)) {
+            $this->forceCleanupHistory();
+        }
+    }
+
+    /**
+     * Force cleanup history by checking database directly
+     * This method queries the database to verify each history entry exists
+     */
+    private function forceCleanupHistory()
+    {
+        $history = $this->getHistory();
+        
+        if (!is_array($history) || empty($history)) {
+            return;
+        }
+        
+        // Get all existing AWB IDs and numbers from database directly
+        $existingAwbIds = AwbUpload::pluck('id')->toArray();
+        $existingAwbNumbers = AwbUpload::pluck('awb_no')->map(function($awbNo) {
+            return strtoupper(trim($awbNo));
+        })->toArray();
+        
+        // Get session AWBs
+        $sessionAwbs = $this->getAwbs();
+        $sessionAwbIds = is_array($sessionAwbs) ? collect($sessionAwbs)->pluck('id')->toArray() : [];
+        
+        // Filter out entries that don't exist
+        $cleanedHistory = [];
+        foreach ($history as $item) {
+            $itemId = isset($item['id']) ? (int)$item['id'] : null;
+            $itemAwbNo = isset($item['awb_no']) ? strtoupper(trim($item['awb_no'])) : null;
+            
+            $shouldKeep = false;
+            
+            // Check if database ID exists
+            if ($itemId && in_array($itemId, $existingAwbIds)) {
+                $shouldKeep = true;
+            }
+            // Check if AWB number exists in database
+            elseif ($itemAwbNo && in_array($itemAwbNo, $existingAwbNumbers)) {
+                $shouldKeep = true;
+            }
+            // Check if ID exists in session AWBs
+            elseif ($itemId && in_array($itemId, $sessionAwbIds)) {
+                $shouldKeep = true;
+            }
+            
+            if ($shouldKeep) {
+                $cleanedHistory[] = $item;
+            }
+        }
+        
+        // Save cleaned history back to session
+        session(['awb_history' => array_values($cleanedHistory)]);
+        session()->save();
+    }
+
+    /**
+     * Clean up history entries for AWBs that no longer exist
+     * @param array $history History array
+     * @return array Cleaned history array
+     */
+    private function cleanupHistory($history)
+    {
+        if (!is_array($history) || empty($history)) {
+            return [];
+        }
+        
+        // Get all existing AWBs from database (both IDs and AWB numbers)
+        $dbAwbs = AwbUpload::select('id', 'awb_no')->get();
+        $dbAwbIds = $dbAwbs->pluck('id')->toArray();
+        $dbAwbNumbers = $dbAwbs->pluck('awb_no')->map(function($awbNo) {
+            return strtoupper(trim($awbNo));
+        })->toArray();
+        
+        // Get all existing AWBs from session
+        $sessionAwbs = $this->getAwbs();
+        $sessionAwbIds = is_array($sessionAwbs) ? collect($sessionAwbs)->pluck('id')->toArray() : [];
+        
+        // Filter history to keep only entries for existing AWBs
+        $cleanedHistory = array_filter($history, function($item) use ($dbAwbIds, $dbAwbNumbers, $sessionAwbIds) {
+            $itemId = isset($item['id']) ? (int)$item['id'] : null;
+            $itemAwbNo = isset($item['awb_no']) ? strtoupper(trim($item['awb_no'])) : null;
+            
+            // Keep if database ID exists
+            if ($itemId && in_array($itemId, $dbAwbIds)) {
+                return true;
+            }
+            
+            // Keep if AWB number exists in database
+            if ($itemAwbNo && in_array($itemAwbNo, $dbAwbNumbers)) {
+                return true;
+            }
+            
+            // Keep if ID exists in session AWBs
+            if ($itemId && in_array($itemId, $sessionAwbIds)) {
+                return true;
+            }
+            
+            // Remove if none of the above match
+            return false;
+        });
+        
+        // Save cleaned history back to session
+        $cleanedHistory = array_values($cleanedHistory);
+        session(['awb_history' => $cleanedHistory]);
+        session()->save();
+        
+        return $cleanedHistory;
     }
 
     public function editAwb($id)
@@ -4588,12 +5168,20 @@ class AdminController extends Controller
             $awbs = [];
         }
         
+        // Get the AWB before deleting to remove from history
+        $awbToDelete = collect($awbs)->firstWhere('id', $id);
+        
         $awbs = array_filter($awbs, function($awb) use ($id) {
             return $awb['id'] != $id;
         });
         
         session(['awbs' => array_values($awbs)]);
         session()->save();
+
+        // Remove from history if exists
+        if ($awbToDelete) {
+            $this->removeFromHistory($awbToDelete['id'] ?? null, $awbToDelete['awb_no'] ?? null);
+        }
 
         return redirect()->route('admin.search-with-awb.all')->with('success', 'AWB deleted successfully!');
     }
@@ -4621,9 +5209,13 @@ class AdminController extends Controller
                     'origin_zone_pincode' => $awb->origin_zone_pincode,
                     'destination_zone_pincode' => $awb->destination_zone_pincode,
                     'pk' => $awb->pk,
+                    'pieces' => $awb->pk, // Alias for backward compatibility
                     'actual_weight' => $awb->actual_weight,
+                    'weight' => $awb->actual_weight, // Alias for backward compatibility
                     'volumetric_weight' => $awb->volumetric_weight,
+                    'vel_weight' => $awb->volumetric_weight, // Alias for backward compatibility
                     'chargeable_weight' => $awb->chargeable_weight,
+                    'chr_weight' => $awb->chargeable_weight, // Alias for backward compatibility
                     'network' => $awb->network_name,
                     'service' => $awb->service_name,
                     'network_name' => $awb->network_name,
@@ -4635,6 +5227,36 @@ class AdminController extends Controller
                     'destination_pin' => $awb->destination_zone_pincode,
                     'display_service_name' => $awb->display_service_name,
                     'operation_remark' => $awb->operation_remark,
+                    'clearance_required' => $awb->clearance_required,
+                    'clearance' => $awb->clearance_required, // Alias for backward compatibility
+                    'remark' => $awb->remark,
+                    'remark_1' => $awb->remark_1,
+                    'remark_2' => $awb->remark_2,
+                    'remark_3' => $awb->remark_3,
+                    'remark_4' => $awb->remark_4,
+                    'remark_5' => $awb->remark_5,
+                    'remark_6' => $awb->remark_6,
+                    'remark_7' => $awb->remark_7,
+                    'type' => $awb->type,
+                    'origin' => $awb->origin,
+                    'origin_zone' => $awb->origin_zone,
+                    'destination_zone' => $awb->destination_zone,
+                    'reference_no' => $awb->reference_no,
+                    'invoice_date' => $awb->invoice_date,
+                    'non_commercial' => $awb->non_commercial,
+                    'consignor_attn' => $awb->consignor_attn,
+                    'consignee_attn' => $awb->consignee_attn,
+                    'goods_type' => $awb->goods_type,
+                    'medical_shipment' => $awb->medical_shipment,
+                    'invoice_value' => $awb->invoice_value,
+                    'is_coc' => $awb->is_coc,
+                    'cod_amount' => $awb->cod_amount,
+                    'payment_deduct' => $awb->payment_deduct,
+                    'location' => $awb->location,
+                    'forwarding_service' => $awb->forwarding_service,
+                    'forwarding_number' => $awb->forwarding_number,
+                    'transfer' => $awb->transfer,
+                    'transfer_on' => $awb->transfer_on,
                 ];
             })->toArray();
         }
@@ -4693,6 +5315,11 @@ class AdminController extends Controller
 
     public function awbUpload()
     {
+        // Check permission
+        if (!$this->hasPermission('view_awb_uploads')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return redirect()->route('admin.awb-upload.create');
     }
 
@@ -4746,8 +5373,137 @@ class AdminController extends Controller
             $awbUploads = collect($this->getAwbUploads());
         }
         
+        // REAL-TIME FILTERING - Direct database queries (no caching)
+        // Filter out AWBs that don't meet validation conditions
+        
+        // Get active networks from database (real-time)
+        $activeNetworks = \App\Models\Network::where('status', 'Active')
+            ->get()
+            ->map(function($net) {
+                return strtolower(trim($net->name));
+            })
+            ->toArray();
+        
+        // Get active services from database with their networks (real-time)
+        $activeServices = \App\Models\Service::where('status', 'Active')->get();
+        $serviceMap = [];
+        foreach ($activeServices as $service) {
+            $serviceName = strtolower(trim($service->name));
+            $serviceNetwork = strtolower(trim($service->network ?? ''));
+            $serviceMap[$serviceName] = $serviceNetwork;
+        }
+        
+        // Get active countries from database (real-time)
+        $activeCountries = \App\Models\Country::where('status', 'Active')
+            ->get()
+            ->map(function($country) {
+                return strtolower(trim($country->name));
+            })
+            ->toArray();
+        
+        // Get active zones from database (real-time)
+        $activeZones = \App\Models\Zone::where('status', 'Active')->get();
+        
+        // Filter AWBs - only keep those that pass ALL validations (real-time database checks)
+        $awbUploads = $awbUploads->filter(function($awb) use ($activeNetworks, $serviceMap, $activeCountries, $activeZones) {
+            // Convert to array if it's a model
+            $awbData = is_object($awb) ? $awb->toArray() : $awb;
+            
+            // 1. Validate network exists and is active (real-time)
+            $networkName = strtolower(trim($awbData['network_name'] ?? ''));
+            if (empty($networkName) || !in_array($networkName, $activeNetworks)) {
+                return false;
+            }
+            
+            // 2. Validate service exists, is active, and belongs to network (real-time)
+            $serviceName = strtolower(trim($awbData['service_name'] ?? ''));
+            if (empty($serviceName) || !isset($serviceMap[$serviceName])) {
+                return false;
+            }
+            if ($serviceMap[$serviceName] !== $networkName) {
+                return false; // Service doesn't belong to the network
+            }
+            
+            // 3. Validate origin country exists and is active (real-time)
+            $origin = strtolower(trim($awbData['origin'] ?? ''));
+            if (empty($origin) || !in_array($origin, $activeCountries)) {
+                return false;
+            }
+            
+            // 4. Validate destination country exists and is active (real-time)
+            $destination = strtolower(trim($awbData['destination'] ?? ''));
+            if (empty($destination) || !in_array($destination, $activeCountries)) {
+                return false;
+            }
+            
+            // 5. Validate origin zone exists for origin country (real-time)
+            $originZone = trim($awbData['origin_zone'] ?? '');
+            if (empty($originZone)) {
+                return false;
+            }
+            $originZoneExists = $activeZones->first(function($zone) use ($origin, $originZone) {
+                $zoneCountry = strtolower(trim($zone->country ?? ''));
+                $zoneName = trim($zone->zone ?? '');
+                return $zoneCountry === $origin && strcasecmp($zoneName, $originZone) === 0;
+            });
+            if (!$originZoneExists) {
+                return false;
+            }
+            
+            // 6. Validate origin zone pincode exists (real-time)
+            $originZonePincode = trim($awbData['origin_zone_pincode'] ?? '');
+            if (empty($originZonePincode)) {
+                return false;
+            }
+            $originPincodeExists = $activeZones->first(function($zone) use ($origin, $originZone, $originZonePincode) {
+                $zoneCountry = strtolower(trim($zone->country ?? ''));
+                $zoneName = trim($zone->zone ?? '');
+                $zonePincode = trim($zone->pincode ?? '');
+                return $zoneCountry === $origin && 
+                       strcasecmp($zoneName, $originZone) === 0 &&
+                       $zonePincode === $originZonePincode;
+            });
+            if (!$originPincodeExists) {
+                return false;
+            }
+            
+            // 7. Validate destination zone exists for destination country (real-time)
+            $destinationZone = trim($awbData['destination_zone'] ?? '');
+            if (empty($destinationZone)) {
+                return false;
+            }
+            $destinationZoneExists = $activeZones->first(function($zone) use ($destination, $destinationZone) {
+                $zoneCountry = strtolower(trim($zone->country ?? ''));
+                $zoneName = trim($zone->zone ?? '');
+                return $zoneCountry === $destination && strcasecmp($zoneName, $destinationZone) === 0;
+            });
+            if (!$destinationZoneExists) {
+                return false;
+            }
+            
+            // 8. Validate destination zone pincode exists (real-time)
+            $destinationZonePincode = trim($awbData['destination_zone_pincode'] ?? '');
+            if (empty($destinationZonePincode)) {
+                return false;
+            }
+            $destinationPincodeExists = $activeZones->first(function($zone) use ($destination, $destinationZone, $destinationZonePincode) {
+                $zoneCountry = strtolower(trim($zone->country ?? ''));
+                $zoneName = trim($zone->zone ?? '');
+                $zonePincode = trim($zone->pincode ?? '');
+                return $zoneCountry === $destination && 
+                       strcasecmp($zoneName, $destinationZone) === 0 &&
+                       $zonePincode === $destinationZonePincode;
+            });
+            if (!$destinationPincodeExists) {
+                return false;
+            }
+            
+            // All validations passed
+            return true;
+        });
+        
         return view('admin.awb-upload.all', [
-            'awbUploads' => $awbUploads,
+            'awbUploads' => $awbUploads->values(), // Re-index the collection
             'networks' => $networks,
             'services' => $services,
             'searchParams' => [
@@ -4770,7 +5526,19 @@ class AdminController extends Controller
 
         try {
             $ids = $request->selected_ids;
+            
+            // Get AWB numbers before deleting to remove from history
+            $awbsToDelete = AwbUpload::whereIn('id', $ids)->get();
+            $awbNumbers = $awbsToDelete->pluck('awb_no')->toArray();
+            
             $deleted = AwbUpload::whereIn('id', $ids)->delete();
+            
+            // Remove from history for all deleted AWBs
+            foreach ($awbNumbers as $awbNo) {
+                if ($awbNo) {
+                    $this->removeFromHistory(null, $awbNo);
+                }
+            }
             
             return redirect()->route('admin.awb-upload.all')
                 ->with('success', "Successfully deleted {$deleted} AWB upload(s).");
@@ -4783,14 +5551,77 @@ class AdminController extends Controller
 
     public function editAwbUpload($id)
     {
+        // Try to get directly from database first
+        $awbUpload = AwbUpload::find($id);
+        
+        if ($awbUpload) {
+            // Convert model to array with all fields
+            $upload = [
+                'id' => $awbUpload->id,
+                'awb_no' => $awbUpload->awb_no,
+                'date_of_sale' => $awbUpload->date_of_sale ? ($awbUpload->date_of_sale instanceof \Carbon\Carbon ? $awbUpload->date_of_sale->format('Y-m-d') : $awbUpload->date_of_sale) : null,
+                'branch' => $awbUpload->branch,
+                'hub' => $awbUpload->hub,
+                'status' => $awbUpload->status,
+                'booking_type' => $awbUpload->booking_type,
+                'shipment_type' => $awbUpload->shipment_type,
+                'destination' => $awbUpload->destination,
+                'origin' => $awbUpload->origin,
+                'consignee' => $awbUpload->consignee,
+                'consignee_name' => $awbUpload->consignee, // Alias for backward compatibility
+                'consignor' => $awbUpload->consignor,
+                'consignor_name' => $awbUpload->consignor, // Alias for backward compatibility
+                'origin_zone_pincode' => $awbUpload->origin_zone_pincode,
+                'destination_zone_pincode' => $awbUpload->destination_zone_pincode,
+                'origin_pin' => $awbUpload->origin_zone_pincode,
+                'destination_pin' => $awbUpload->destination_zone_pincode,
+                'pk' => $awbUpload->pk,
+                'pieces' => $awbUpload->pk,
+                'actual_weight' => $awbUpload->actual_weight,
+                'weight' => $awbUpload->actual_weight,
+                'volumetric_weight' => $awbUpload->volumetric_weight,
+                'vel_weight' => $awbUpload->volumetric_weight,
+                'chargeable_weight' => $awbUpload->chargeable_weight,
+                'chr_weight' => $awbUpload->chargeable_weight,
+                'network_name' => $awbUpload->network_name,
+                'service_name' => $awbUpload->service_name,
+                'amour' => $awbUpload->amour,
+                'clearance_required' => $awbUpload->clearance_required,
+                'clearance' => $awbUpload->clearance_required,
+                'operation_remark' => $awbUpload->operation_remark,
+                'display_service_name' => $awbUpload->display_service_name,
+                'remark' => $awbUpload->remark,
+                'remark_1' => $awbUpload->remark_1,
+                'remark_2' => $awbUpload->remark_2,
+                'remark_3' => $awbUpload->remark_3,
+                'remark_4' => $awbUpload->remark_4,
+                'remark_5' => $awbUpload->remark_5,
+                'remark_6' => $awbUpload->remark_6,
+                'remark_7' => $awbUpload->remark_7,
+            ];
+        } else {
+            // Fallback to getAwbUploads method
+            $awbUploads = $this->getAwbUploads();
+            $id = (int) $id;
+            $upload = collect($awbUploads)->first(function($item) use ($id) {
+                return (int)($item['id'] ?? 0) === $id;
+            });
+            
+            if ($upload && is_object($upload)) {
+                $upload = (array) $upload;
+            } elseif (!$upload) {
+                $upload = [];
+            }
+        }
+        
         $awbUploads = $this->getAwbUploads();
-        $upload = collect($awbUploads)->firstWhere('id', $id);
         $countries = $this->getCountries(true); // Get only active countries for dropdown
         $networks = $this->getNetworks(true); // Get only active networks for dropdown
         $services = $this->getServices(true); // Get only active services for dropdown
         $bookingTypes = $this->getBookingTypes();
         $shipmentTypes = $this->getShipmentTypesForUpload();
-        if (!$upload) {
+        
+        if (empty($upload) || !isset($upload['id'])) {
             return redirect()->route('admin.awb-upload.all')->with('error', 'AWB Upload not found');
         }
 
@@ -4847,9 +5678,98 @@ class AdminController extends Controller
             'hub' => 'required|string|max:255',
         ]);
 
-        // Check for duplicate AWB No in database
-        if (AwbUpload::where('awb_no', $request->awb_no)->exists()) {
-            return redirect()->back()->withInput()->with('error', 'AWB No. already exists. Duplicate AWB numbers are not allowed.');
+        // REAL-TIME duplicate check - Direct database query (no caching)
+        // Trim whitespace but preserve special characters
+        $awbNo = trim($request->awb_no);
+        
+        // Skip if AWB number is empty
+        if (empty($awbNo)) {
+            return redirect()->back()->withInput()->with('error', 'AWB No. is required.');
+        }
+        
+        // Check if AWB number already exists in database (case-sensitive, exact match)
+        // Use fresh() to ensure we're getting the latest data from database
+        $existingAwb = AwbUpload::where('awb_no', $awbNo)->first();
+        if ($existingAwb) {
+            // Log for debugging
+            \Log::info("Duplicate AWB check - Found existing AWB: ID={$existingAwb->id}, AWB_No={$awbNo}");
+            return redirect()->back()->withInput()->with('error', 'AWB No. "' . $awbNo . '" already exists in the system (ID: ' . $existingAwb->id . '). Duplicate AWB numbers are not allowed. Please use a different AWB number or delete the existing one first.');
+        }
+
+        // REAL-TIME VALIDATION - Direct database queries (no caching)
+        
+        // Validate network exists and is active (case-insensitive, real-time)
+        $network = \App\Models\Network::whereRaw('LOWER(name) = LOWER(?)', [trim($request->network_name)])
+            ->where('status', 'Active')
+            ->first();
+        if (!$network) {
+            return redirect()->back()->withInput()->with('error', 'Network "' . $request->network_name . '" does not exist or is not active. Please create the network first.');
+        }
+
+        // Validate service exists, is active, and belongs to network (case-insensitive, real-time)
+        $service = \App\Models\Service::whereRaw('LOWER(name) = LOWER(?)', [trim($request->service_name)])
+            ->where('status', 'Active')
+            ->first();
+        if (!$service) {
+            return redirect()->back()->withInput()->with('error', 'Service "' . $request->service_name . '" does not exist or is not active. Please create the service first.');
+        }
+        // Check if service belongs to network (case-insensitive)
+        if (isset($service->network) && strcasecmp(trim($service->network), trim($request->network_name)) !== 0) {
+            return redirect()->back()->withInput()->with('error', 'Service "' . $request->service_name . '" does not belong to network "' . $request->network_name . '". Service belongs to network "' . ($service->network ?? 'N/A') . '".');
+        }
+
+        // Validate origin country exists and is active (case-insensitive, real-time)
+        $originCountry = \App\Models\Country::whereRaw('LOWER(name) = LOWER(?)', [trim($request->origin)])
+            ->where('status', 'Active')
+            ->first();
+        if (!$originCountry) {
+            return redirect()->back()->withInput()->with('error', 'Origin country "' . $request->origin . '" does not exist or is not active. Please create the country first.');
+        }
+
+        // Validate destination country exists and is active (case-insensitive, real-time)
+        $destinationCountry = \App\Models\Country::whereRaw('LOWER(name) = LOWER(?)', [trim($request->destination)])
+            ->where('status', 'Active')
+            ->first();
+        if (!$destinationCountry) {
+            return redirect()->back()->withInput()->with('error', 'Destination country "' . $request->destination . '" does not exist or is not active. Please create the country first.');
+        }
+
+        // Validate origin zone exists for origin country (case-insensitive, real-time)
+        $originZoneExists = \App\Models\Zone::whereRaw('LOWER(country) = LOWER(?)', [trim($request->origin)])
+            ->whereRaw('LOWER(zone) = LOWER(?)', [trim($request->origin_zone)])
+            ->where('status', 'Active')
+            ->exists();
+        if (!$originZoneExists) {
+            return redirect()->back()->withInput()->with('error', 'Origin zone "' . $request->origin_zone . '" does not exist for country "' . $request->origin . '". Please create the zone first.');
+        }
+
+        // Validate origin zone pincode exists (real-time)
+        $originPincodeExists = \App\Models\Zone::whereRaw('LOWER(country) = LOWER(?)', [trim($request->origin)])
+            ->whereRaw('LOWER(zone) = LOWER(?)', [trim($request->origin_zone)])
+            ->where('pincode', trim($request->origin_zone_pincode))
+            ->where('status', 'Active')
+            ->exists();
+        if (!$originPincodeExists) {
+            return redirect()->back()->withInput()->with('error', 'Origin zone pincode "' . $request->origin_zone_pincode . '" does not exist for zone "' . $request->origin_zone . '" in country "' . $request->origin . '". Please create the pincode first.');
+        }
+
+        // Validate destination zone exists for destination country (case-insensitive, real-time)
+        $destinationZoneExists = \App\Models\Zone::whereRaw('LOWER(country) = LOWER(?)', [trim($request->destination)])
+            ->whereRaw('LOWER(zone) = LOWER(?)', [trim($request->destination_zone)])
+            ->where('status', 'Active')
+            ->exists();
+        if (!$destinationZoneExists) {
+            return redirect()->back()->withInput()->with('error', 'Destination zone "' . $request->destination_zone . '" does not exist for country "' . $request->destination . '". Please create the zone first.');
+        }
+
+        // Validate destination zone pincode exists (real-time)
+        $destinationPincodeExists = \App\Models\Zone::whereRaw('LOWER(country) = LOWER(?)', [trim($request->destination)])
+            ->whereRaw('LOWER(zone) = LOWER(?)', [trim($request->destination_zone)])
+            ->where('pincode', trim($request->destination_zone_pincode))
+            ->where('status', 'Active')
+            ->exists();
+        if (!$destinationPincodeExists) {
+            return redirect()->back()->withInput()->with('error', 'Destination zone pincode "' . $request->destination_zone_pincode . '" does not exist for zone "' . $request->destination_zone . '" in country "' . $request->destination . '". Please create the pincode first.');
         }
 
         // Create AWB upload in database
@@ -4904,103 +5824,233 @@ class AdminController extends Controller
             'operation_remark' => $request->operation_remark ?? null,
         ]);
 
-        return redirect()->route('admin.awb-upload.all')->with('success', 'AWB Upload created successfully!');
+        // Get the created AWB number for the success message
+        $awbNo = trim($request->awb_no);
+        
+        return redirect()->route('admin.awb-upload.all')
+            ->with('success', '✅ AWB "' . $awbNo . '" created successfully! The AWB has been added to the list and is now visible.');
     }
 
     public function updateAwbUpload(Request $request, $id)
     {
         $request->validate([
             'awb_no' => 'required|string|max:255',
-            'date_of_sale' => 'nullable|date',
-            'branch' => 'nullable|string|max:255',
-            'hub' => 'nullable|string|max:255',
-            'status' => 'required|string|max:255',
-            'booking_type' => 'nullable|string|in:International,Domestic',
-            'shipment_type' => 'required|string|in:Dox,Non-Dox,Other',
+            'type' => 'required|string|in:domestic,international',
+            'origin' => 'required|string|max:255',
+            'origin_zone' => 'required|string|max:255',
+            'origin_zone_pincode' => 'required|string|max:20',
             'destination' => 'required|string|max:255',
-            'consignee_name' => 'nullable|string|max:255',
-            'origin_pin' => 'required|string|max:20',
-            'destination_pin' => 'required|string|max:20',
-            'pieces' => 'required|integer|min:1',
-            'weight' => 'required|numeric|min:0',
-            'vel_weight' => 'required|numeric|min:0',
-            'chr_weight' => 'required|numeric|min:0',
-            'clearance' => 'nullable|string|max:255',
-            'operation_remark' => 'nullable|string',
-            'network' => 'nullable|string|max:255',
-            'service' => 'nullable|string|max:255',
-            'display_service_name' => 'nullable|string|max:255',
+            'destination_zone' => 'required|string|max:255',
+            'destination_zone_pincode' => 'required|string|max:20',
+            'reference_no' => 'nullable|string|max:255',
+            'date_of_sale' => 'nullable|date',
+            'non_commercial' => 'nullable|string|in:Yes,No',
+            'consignor' => 'required|string|max:255',
+            'consignor_attn' => 'required|string|max:255',
+            'consignee' => 'required|string|max:255',
+            'consignee_attn' => 'required|string|max:255',
+            'goods_type' => 'nullable|string|max:255',
+            'pk' => 'required|integer|min:1',
+            'actual_weight' => 'required|numeric|min:0',
+            'volumetric_weight' => 'required|numeric|min:0',
+            'chargeable_weight' => 'required|string|max:255',
+            'network_name' => 'required|string|max:255',
+            'service_name' => 'required|string|max:255',
+            'amour' => 'required|numeric|min:0',
+            'medical_shipment' => 'nullable|string|in:Yes,No',
+            'invoice_value' => 'nullable|numeric|min:0',
+            'invoice_date' => 'nullable|date',
+            'is_coc' => 'nullable|boolean',
+            'cod_amount' => 'nullable|numeric|min:0',
+            'clearance_required' => 'nullable|string|in:Yes,No',
+            'clearance_remark' => 'nullable|string',
+            'status' => 'required|string|in:publish,Booked,RTO,Cancelled,Delivered',
+            'payment_deduct' => 'nullable|string|in:Yes,No',
+            'location' => 'nullable|string|max:255',
+            'forwarding_service' => 'nullable|string|max:255',
+            'forwarding_number' => 'nullable|string|max:255',
+            'transfer' => 'nullable|string|max:255',
+            'transfer_on' => 'nullable|date',
             'remark_1' => 'nullable|string',
             'remark_2' => 'nullable|string',
             'remark_3' => 'nullable|string',
-            'remark_4' => 'nullable|string',
-            'remark_5' => 'nullable|string',
-            'remark_6' => 'nullable|string',
-            'remark_7' => 'nullable|string',
+            'branch' => 'required|string|max:255',
+            'hub' => 'required|string|max:255',
         ]);
 
-        // Check for duplicate AWB No (excluding current record)
-        $awbUploads = $this->getAwbUploads();
-        $duplicate = collect($awbUploads)->first(function($upload) use ($request, $id) {
-            return $upload['awb_no'] == $request->awb_no && $upload['id'] != $id;
-        });
-        if ($duplicate) {
-            return redirect()->back()->withInput()->with('error', 'AWB No. already exists. Duplicate AWB numbers are not allowed.');
-        }
-
-        if (!is_array($awbUploads)) {
-            $awbUploads = [];
-        }
-        
-        $awbUploads = array_map(function($upload) use ($id, $request) {
-            if ($upload['id'] == $id) {
-                return [
-                    'id' => $id,
-                    'awb_no' => $request->awb_no,
-                    'date_of_sale' => $request->date_of_sale ?? '',
-                    'hub' => $request->hub ?? '',
-                    'branch' => $request->branch ?? '',
-                    'status' => $request->status,
-                    'booking_type' => $request->booking_type ?? '',
-                    'shipment_type' => $request->shipment_type,
-                    'destination' => $request->destination,
-                    'consignee_name' => $request->consignee_name ?? '',
-                    'origin_pin' => $request->origin_pin,
-                    'destination_pin' => $request->destination_pin,
-                    'pieces' => $request->pieces,
-                    'weight' => $request->weight,
-                    'vel_weight' => $request->vel_weight,
-                    'chr_weight' => $request->chr_weight,
-                    'clearance' => $request->clearance ?? '',
-                    'operation_remark' => $request->operation_remark ?? '',
-                    'network' => $request->network ?? '',
-                    'service' => $request->service ?? '',
-                    'display_service_name' => $request->display_service_name ?? '',
-                    'remark_1' => $request->remark_1 ?? '',
-                    'remark_2' => $request->remark_2 ?? '',
-                    'remark_3' => $request->remark_3 ?? '',
-                    'remark_4' => $request->remark_4 ?? '',
-                    'remark_5' => $request->remark_5 ?? '',
-                    'remark_6' => $request->remark_6 ?? '',
-                    'remark_7' => $request->remark_7 ?? '',
-                ];
+        try {
+            // Try to update in database first
+            $awbUpload = AwbUpload::find($id);
+            
+            if (!$awbUpload) {
+                return redirect()->back()->withInput()->with('error', 'AWB Upload not found.');
             }
-            return $upload;
-        }, $awbUploads);
-        
-        session(['awb_uploads' => array_values($awbUploads)]);
-        session()->save();
 
-        return redirect()->route('admin.awb-upload.all')->with('success', 'AWB Upload updated successfully!');
+            // REAL-TIME duplicate check - Direct database query (excluding current record)
+            // Trim whitespace but preserve special characters
+            $awbNo = trim($request->awb_no);
+            
+            // Skip if AWB number is empty
+            if (empty($awbNo)) {
+                return redirect()->back()->withInput()->with('error', 'AWB No. is required.');
+            }
+            
+            // Check if AWB number already exists for another record (case-sensitive, exact match)
+            $duplicate = AwbUpload::where('awb_no', $awbNo)
+                ->where('id', '!=', $id)
+                ->first();
+            
+            if ($duplicate) {
+                return redirect()->back()->withInput()->with('error', 'AWB No. "' . $awbNo . '" already exists in the system (ID: ' . $duplicate->id . '). Duplicate AWB numbers are not allowed. Please use a different AWB number or delete the existing one first.');
+            }
+
+            // REAL-TIME VALIDATION - Direct database queries (no caching)
+            
+            // Validate network exists and is active (case-insensitive, real-time)
+            $network = \App\Models\Network::whereRaw('LOWER(name) = LOWER(?)', [trim($request->network_name)])
+                ->where('status', 'Active')
+                ->first();
+            if (!$network) {
+                return redirect()->back()->withInput()->with('error', 'Network "' . $request->network_name . '" does not exist or is not active. Please create the network first.');
+            }
+
+            // Validate service exists, is active, and belongs to network (case-insensitive, real-time)
+            $service = \App\Models\Service::whereRaw('LOWER(name) = LOWER(?)', [trim($request->service_name)])
+                ->where('status', 'Active')
+                ->first();
+            if (!$service) {
+                return redirect()->back()->withInput()->with('error', 'Service "' . $request->service_name . '" does not exist or is not active. Please create the service first.');
+            }
+            // Check if service belongs to network (case-insensitive)
+            if (isset($service->network) && strcasecmp(trim($service->network), trim($request->network_name)) !== 0) {
+                return redirect()->back()->withInput()->with('error', 'Service "' . $request->service_name . '" does not belong to network "' . $request->network_name . '". Service belongs to network "' . ($service->network ?? 'N/A') . '".');
+            }
+
+            // Validate origin country exists and is active (case-insensitive, real-time)
+            $originCountry = \App\Models\Country::whereRaw('LOWER(name) = LOWER(?)', [trim($request->origin)])
+                ->where('status', 'Active')
+                ->first();
+            if (!$originCountry) {
+                return redirect()->back()->withInput()->with('error', 'Origin country "' . $request->origin . '" does not exist or is not active. Please create the country first.');
+            }
+
+            // Validate destination country exists and is active (case-insensitive, real-time)
+            $destinationCountry = \App\Models\Country::whereRaw('LOWER(name) = LOWER(?)', [trim($request->destination)])
+                ->where('status', 'Active')
+                ->first();
+            if (!$destinationCountry) {
+                return redirect()->back()->withInput()->with('error', 'Destination country "' . $request->destination . '" does not exist or is not active. Please create the country first.');
+            }
+
+            // Validate origin zone exists for origin country (case-insensitive, real-time)
+            $originZoneExists = \App\Models\Zone::whereRaw('LOWER(country) = LOWER(?)', [trim($request->origin)])
+                ->whereRaw('LOWER(zone) = LOWER(?)', [trim($request->origin_zone)])
+                ->where('status', 'Active')
+                ->exists();
+            if (!$originZoneExists) {
+                return redirect()->back()->withInput()->with('error', 'Origin zone "' . $request->origin_zone . '" does not exist for country "' . $request->origin . '". Please create the zone first.');
+            }
+
+            // Validate origin zone pincode exists (real-time)
+            $originPincodeExists = \App\Models\Zone::whereRaw('LOWER(country) = LOWER(?)', [trim($request->origin)])
+                ->whereRaw('LOWER(zone) = LOWER(?)', [trim($request->origin_zone)])
+                ->where('pincode', trim($request->origin_zone_pincode))
+                ->where('status', 'Active')
+                ->exists();
+            if (!$originPincodeExists) {
+                return redirect()->back()->withInput()->with('error', 'Origin zone pincode "' . $request->origin_zone_pincode . '" does not exist for zone "' . $request->origin_zone . '" in country "' . $request->origin . '". Please create the pincode first.');
+            }
+
+            // Validate destination zone exists for destination country (case-insensitive, real-time)
+            $destinationZoneExists = \App\Models\Zone::whereRaw('LOWER(country) = LOWER(?)', [trim($request->destination)])
+                ->whereRaw('LOWER(zone) = LOWER(?)', [trim($request->destination_zone)])
+                ->where('status', 'Active')
+                ->exists();
+            if (!$destinationZoneExists) {
+                return redirect()->back()->withInput()->with('error', 'Destination zone "' . $request->destination_zone . '" does not exist for country "' . $request->destination . '". Please create the zone first.');
+            }
+
+            // Validate destination zone pincode exists (real-time)
+            $destinationPincodeExists = \App\Models\Zone::whereRaw('LOWER(country) = LOWER(?)', [trim($request->destination)])
+                ->whereRaw('LOWER(zone) = LOWER(?)', [trim($request->destination_zone)])
+                ->where('pincode', trim($request->destination_zone_pincode))
+                ->where('status', 'Active')
+                ->exists();
+            if (!$destinationPincodeExists) {
+                return redirect()->back()->withInput()->with('error', 'Destination zone pincode "' . $request->destination_zone_pincode . '" does not exist for zone "' . $request->destination_zone . '" in country "' . $request->destination . '". Please create the pincode first.');
+            }
+
+            // Update database record with all fields from create form
+            $awbUpload->update([
+                'awb_no' => trim($request->awb_no), // Trim whitespace and preserve special characters
+                'type' => $request->type,
+                'origin' => $request->origin,
+                'origin_zone' => $request->origin_zone,
+                'origin_zone_pincode' => $request->origin_zone_pincode,
+                'destination' => $request->destination,
+                'destination_zone' => $request->destination_zone,
+                'destination_zone_pincode' => $request->destination_zone_pincode,
+                'reference_no' => $request->reference_no ?? null,
+                'date_of_sale' => $request->date_of_sale ? \Carbon\Carbon::parse($request->date_of_sale) : null,
+                'non_commercial' => $request->non_commercial ?? null,
+                'consignor' => $request->consignor,
+                'consignor_attn' => $request->consignor_attn,
+                'consignee' => $request->consignee,
+                'consignee_attn' => $request->consignee_attn,
+                'goods_type' => $request->goods_type ?? null,
+                'pk' => $request->pk,
+                'actual_weight' => $request->actual_weight,
+                'volumetric_weight' => $request->volumetric_weight,
+                'chargeable_weight' => $request->chargeable_weight,
+                'network_name' => $request->network_name,
+                'service_name' => $request->service_name,
+                'amour' => $request->amour,
+                'medical_shipment' => $request->medical_shipment ?? null,
+                'invoice_value' => $request->invoice_value ?? null,
+                'invoice_date' => $request->invoice_date ? \Carbon\Carbon::parse($request->invoice_date) : null,
+                'is_coc' => $request->is_coc ?? false,
+                'cod_amount' => $request->cod_amount ?? 0,
+                'clearance_required' => $request->clearance_required ?? null,
+                'clearance_remark' => $request->clearance_remark ?? null,
+                'status' => $request->status,
+                'payment_deduct' => $request->payment_deduct ?? null,
+                'location' => $request->location ?? null,
+                'forwarding_service' => $request->forwarding_service ?? null,
+                'forwarding_number' => $request->forwarding_number ?? null,
+                'transfer' => $request->transfer ?? null,
+                'transfer_on' => $request->transfer_on ? \Carbon\Carbon::parse($request->transfer_on) : null,
+                'remark_1' => $request->remark_1 ?? null,
+                'remark_2' => $request->remark_2 ?? null,
+                'remark_3' => $request->remark_3 ?? null,
+                'branch' => $request->branch,
+                'hub' => $request->hub,
+            ]);
+
+            return redirect()->route('admin.awb-upload.all')->with('success', 'AWB Upload updated successfully!');
+            
+        } catch (\Exception $e) {
+            \Log::error('Error updating AWB upload: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            
+            return redirect()->back()->withInput()->with('error', 'Error updating AWB upload: ' . $e->getMessage());
+        }
     }
 
     public function deleteAwbUpload($id)
     {
         try {
+            // Get the AWB before deleting to remove from history
+            $awbToDelete = AwbUpload::find($id);
+            $awbNo = $awbToDelete ? $awbToDelete->awb_no : null;
+            
             // Try to delete from database first
             $deleted = AwbUpload::where('id', $id)->delete();
             
             if ($deleted) {
+                // Remove from history by awb_no
+                if ($awbNo) {
+                    $this->removeFromHistory(null, $awbNo);
+                }
                 return redirect()->route('admin.awb-upload.all')->with('success', 'AWB Upload deleted successfully!');
             }
             
@@ -5010,12 +6060,21 @@ class AdminController extends Controller
                 $awbUploads = [];
             }
             
+            // Get AWB number before filtering
+            $sessionAwb = collect($awbUploads)->firstWhere('id', $id);
+            $sessionAwbNo = $sessionAwb['awb_no'] ?? null;
+            
             $awbUploads = array_filter($awbUploads, function($upload) use ($id) {
                 return $upload['id'] != $id;
             });
             
             session(['awb_uploads' => array_values($awbUploads)]);
             session()->save();
+
+            // Remove from history by awb_no
+            if ($sessionAwbNo) {
+                $this->removeFromHistory(null, $sessionAwbNo);
+            }
 
             return redirect()->route('admin.awb-upload.all')->with('success', 'AWB Upload deleted successfully!');
         } catch (\Exception $e) {
@@ -5035,53 +6094,33 @@ class AdminController extends Controller
         try {
             $file = $request->file('excel_file');
             
-            // Get networks and services for validation
-            $networks = $this->getNetworks();
-            $services = $this->getServices();
-            
-            // Import Excel file
+            // Import Excel file with strict validation
+            // All validations are done in AwbUploadsImport class
+            // If any validation fails, an exception will be thrown and the import will stop
             $import = new AwbUploadsImport();
-            Excel::import($import, $file);
             
-            // After import, fetch service and network names from existing tables
-            $uploadedAwbs = AwbUpload::whereDate('created_at', today())->get();
-            
-            $updated = 0;
-            
-            foreach ($uploadedAwbs as $awb) {
-                // Fetch service name - if service_name exists in Excel, try to match with services
-                if (!empty($awb->service_name)) {
-                    $matchedService = collect($services)->first(function($service) use ($awb) {
-                        return stripos($service['name'], $awb->service_name) !== false 
-                            || stripos($awb->service_name, $service['name']) !== false;
-                    });
-                    
-                    if ($matchedService) {
-                        $awb->service_name = $matchedService['name'];
-                        $awb->display_service_name = $matchedService['name'];
-                    }
+            try {
+                Excel::import($import, $file);
+            } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
+                $failures = $e->failures();
+                $errorMessages = [];
+                foreach ($failures as $failure) {
+                    $errorMessages[] = "Row {$failure->row()}: " . implode(', ', $failure->errors());
                 }
-                
-                // Fetch network name - if network_name exists in Excel, try to match with networks
-                if (!empty($awb->network_name)) {
-                    $matchedNetwork = collect($networks)->first(function($network) use ($awb) {
-                        return stripos($network['name'], $awb->network_name) !== false 
-                            || stripos($awb->network_name, $network['name']) !== false;
-                    });
-                    
-                    if ($matchedNetwork) {
-                        $awb->network_name = $matchedNetwork['name'];
-                    }
-                }
-                
-                $awb->save();
-                $updated++;
+                return redirect()->back()
+                    ->with('error', 'Validation failed: ' . implode(' | ', $errorMessages))
+                    ->withInput();
+            } catch (\Exception $e) {
+                // Catch validation errors from our custom validation
+                return redirect()->back()
+                    ->with('error', 'Import failed: ' . $e->getMessage())
+                    ->withInput();
             }
             
             $totalImported = AwbUpload::whereDate('created_at', today())->count();
             
             return redirect()->route('admin.awb-upload.all')
-                ->with('success', "Bulk upload completed! {$totalImported} records imported successfully. {$updated} records matched with existing services/networks.");
+                ->with('success', "Bulk upload completed! {$totalImported} record(s) imported successfully. All records have been validated for network, service, countries, zones, and pincodes.");
                 
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             $failures = $e->failures();
@@ -5156,6 +6195,11 @@ class AdminController extends Controller
 
     public function bookings()
     {
+        // Check permission
+        if (!$this->hasPermission('view_bookings')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return redirect()->route('admin.bookings.create');
     }
 
@@ -5635,6 +6679,11 @@ class AdminController extends Controller
     // Transactions Management
     public function allTransactions(Request $request)
     {
+        // Check permission
+        if (!$this->hasPermission('view_transactions')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         $query = NetworkTransaction::with('network')->latest();
         
         // Search by AWB, booking ID, or description
@@ -6395,6 +7444,11 @@ class AdminController extends Controller
     // Reports Management
     public function reportsIndex()
     {
+        // Check permission
+        if (!$this->hasPermission('view_reports')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return view('admin.reports.index');
     }
 
@@ -8508,6 +9562,11 @@ class AdminController extends Controller
 
     public function banks()
     {
+        // Check permission
+        if (!$this->hasPermission('view_banks')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return redirect()->route('admin.banks.create');
     }
 
@@ -9470,6 +10529,11 @@ class AdminController extends Controller
 
     public function payments()
     {
+        // Check permission
+        if (!$this->hasPermission('view_payments')) {
+            return redirect()->route('admin.dashboard')->with('error', 'You do not have permission to access this page.');
+        }
+        
         return redirect()->route('admin.payments.create');
     }
 

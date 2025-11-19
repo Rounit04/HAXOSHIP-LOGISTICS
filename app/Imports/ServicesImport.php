@@ -7,19 +7,21 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
 use Illuminate\Support\Collection;
 use App\Models\Network;
+use App\Models\Service;
+use Illuminate\Support\Facades\DB;
 
 class ServicesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
 {
+    public $errors = [];
+    public $importedCount = 0;
+    public $rowNumber = 1;
+    public $validRows = [];
+
     /**
      * @param Collection $collection
      */
     public function collection(Collection $collection)
     {
-        $services = session('services', []);
-        if (!is_array($services)) {
-            $services = [];
-        }
-
         // Get all networks to validate against
         $dbNetworks = Network::all();
         $networkNames = $dbNetworks->pluck('name')->toArray();
@@ -30,58 +32,128 @@ class ServicesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
             $networkNames = collect($sessionNetworks)->pluck('name')->toArray();
         }
 
-        $maxId = count($services) > 0 ? max(array_column($services, 'id')) : 0;
-
+        // STEP 1: Validate ALL rows first (don't import anything yet)
         foreach ($collection as $row) {
+            $this->rowNumber++;
+            $rowErrors = [];
+            
             $serviceName = $this->getValue($row, ['service_name', 'name', 'service']);
+            $serviceName = $serviceName ? trim($serviceName) : '';
+            
             if (empty($serviceName)) {
-                continue; // Skip rows without service name
+                $rowErrors[] = "Service name is required";
+            } else {
+                // Validate service name doesn't contain invalid keywords
+                $invalidKeywords = ['wrong', 'error', 'invalid', 'test wrong', 'wrong test'];
+                $serviceNameLower = strtolower($serviceName);
+                foreach ($invalidKeywords as $keyword) {
+                    if (strpos($serviceNameLower, $keyword) !== false) {
+                        $rowErrors[] = "Service name contains invalid keyword '{$keyword}'. Please use a valid service name";
+                        break;
+                    }
+                }
+                
+                // Validate service name format (should not be empty after trimming)
+                if (strlen($serviceName) < 2) {
+                    $rowErrors[] = "Service name is too short (minimum 2 characters)";
+                }
+                
+                // Validate service name doesn't have only spaces or special characters
+                if (preg_match('/^[\s\-_]+$/', $serviceName)) {
+                    $rowErrors[] = "Service name contains only invalid characters";
+                }
             }
 
             $network = $this->getValue($row, ['network', 'network_name']);
+            $network = $network ? trim($network) : '';
             
-            // Skip if network doesn't exist
-            if (empty($network) || !in_array($network, $networkNames)) {
-                continue; // Skip services whose network doesn't exist
+            // Validate network exists
+            if (empty($network)) {
+                $rowErrors[] = "Network is required";
+            } elseif (!in_array($network, $networkNames)) {
+                $rowErrors[] = "Network '{$network}' does not exist. Please create the network first";
             }
 
-            // Check if service already exists (same name AND same network)
-            $exists = collect($services)->first(function($service) use ($serviceName, $network) {
-                return strcasecmp($service['name'] ?? '', $serviceName) === 0 &&
-                       strcasecmp($service['network'] ?? '', $network) === 0;
-            });
-
-            if ($exists) {
-                continue; // Skip duplicate (same service name and network combination)
+            // Additional validation: Check for suspicious patterns in service name
+            if (!empty($serviceName) && !empty($network)) {
+                // Check for common data entry errors
+                if (strlen($serviceName) > 100) {
+                    $rowErrors[] = "Service name is too long (maximum 100 characters)";
+                }
             }
 
-            $maxId++;
+            // Validate required fields
             $transitTime = $this->getValue($row, ['transit_time', 'transit time']);
-            $itemsAllowed = $this->getValue($row, ['items_allowed', 'items allowed']);
-            $status = $this->getStatus($this->getValue($row, ['status']));
-            $remark = $this->getValue($row, ['remark', 'remarks']);
-            $displayTitle = $this->getValue($row, ['display_title', 'display title']) ?? $serviceName;
-            $description = $this->getValue($row, ['description']);
-            $iconType = $this->getValue($row, ['icon_type', 'icon type']) ?? 'truck';
-            $isHighlighted = $this->getBoolean($this->getValue($row, ['is_highlighted', 'is highlighted', 'highlighted']));
+            $transitTime = $transitTime ? trim($transitTime) : '';
+            if (empty($transitTime)) {
+                $rowErrors[] = "Transit time is required";
+            }
 
-            $services[] = [
-                'id' => $maxId,
-                'name' => $serviceName,
-                'network' => $network,
-                'transit_time' => $transitTime ?? '',
-                'items_allowed' => $itemsAllowed ?? '',
-                'status' => $status,
-                'remark' => $remark ?? '',
-                'display_title' => $displayTitle,
-                'description' => $description ?? '',
-                'icon_type' => $iconType,
-                'is_highlighted' => $isHighlighted,
-            ];
+            $itemsAllowed = $this->getValue($row, ['items_allowed', 'items allowed']);
+            $itemsAllowed = $itemsAllowed ? trim($itemsAllowed) : '';
+            if (empty($itemsAllowed)) {
+                $rowErrors[] = "Items allowed is required";
+            }
+
+            // Check if service already exists in database (same name AND same network)
+            if (!empty($serviceName) && !empty($network) && empty($rowErrors)) {
+                $exists = Service::whereRaw('LOWER(name) = LOWER(?)', [$serviceName])
+                    ->whereRaw('LOWER(network) = LOWER(?)', [$network])
+                    ->first();
+
+                if ($exists) {
+                    $rowErrors[] = "Service '{$serviceName}' with network '{$network}' already exists (ID: {$exists->id})";
+                }
+            }
+
+            // If there are errors in this row, add them to the errors list
+            if (!empty($rowErrors)) {
+                $serviceNameDisplay = !empty($serviceName) ? "'{$serviceName}'" : 'Unknown';
+                $this->errors[] = "Row {$this->rowNumber} ({$serviceNameDisplay}): " . implode(', ', $rowErrors);
+            } else {
+                // Row is valid, store it for import
+                $this->validRows[] = [
+                    'row_number' => $this->rowNumber,
+                    'service_name' => trim($serviceName),
+                    'network' => trim($network),
+                    'transit_time' => $this->getValue($row, ['transit_time', 'transit time']) ?? '',
+                    'items_allowed' => $this->getValue($row, ['items_allowed', 'items allowed']) ?? '',
+                    'status' => $this->getStatus($this->getValue($row, ['status'])),
+                    'remark' => $this->getValue($row, ['remark', 'remarks']) ?? '',
+                    'display_title' => $this->getValue($row, ['display_title', 'display title']) ?? $serviceName,
+                    'description' => $this->getValue($row, ['description']) ?? '',
+                    'icon_type' => $this->getValue($row, ['icon_type', 'icon type']) ?? 'truck',
+                    'is_highlighted' => $this->getBoolean($this->getValue($row, ['is_highlighted', 'is highlighted', 'highlighted'])),
+                ];
+            }
         }
 
-        session(['services' => $services]);
-        session()->save();
+        // STEP 2: Only import if there are NO errors (all-or-nothing)
+        if (empty($this->errors)) {
+            // Use database transaction to ensure all-or-nothing import
+            DB::beginTransaction();
+            try {
+                foreach ($this->validRows as $validRow) {
+                    Service::create([
+                        'name' => $validRow['service_name'],
+                        'network' => $validRow['network'],
+                        'transit_time' => $validRow['transit_time'],
+                        'items_allowed' => $validRow['items_allowed'],
+                        'status' => $validRow['status'],
+                        'remark' => $validRow['remark'],
+                        'display_title' => $validRow['display_title'],
+                        'description' => $validRow['description'],
+                        'icon_type' => $validRow['icon_type'],
+                        'is_highlighted' => $validRow['is_highlighted'],
+                    ]);
+                    $this->importedCount++;
+                }
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                $this->errors[] = "Database error during import: " . $e->getMessage();
+            }
+        }
     }
 
     private function getValue($row, array $keys)

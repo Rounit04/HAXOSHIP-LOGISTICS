@@ -3,13 +3,19 @@
 namespace App\Imports;
 
 use App\Models\AwbUpload;
+use App\Models\Network;
+use App\Models\Service;
+use App\Models\Country;
 use Maatwebsite\Excel\Concerns\ToModel;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithStartRow;
 use Maatwebsite\Excel\Concerns\SkipsEmptyRows;
+use Maatwebsite\Excel\Concerns\WithValidation;
+use Maatwebsite\Excel\Validators\Failure;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
-class AwbUploadsImport implements ToModel, WithHeadingRow, WithStartRow, SkipsEmptyRows
+class AwbUploadsImport implements ToModel, WithHeadingRow, WithStartRow, SkipsEmptyRows, WithValidation
 {
     /**
      * Start reading from row 2 (row 1 has indicators, row 2 has headers)
@@ -85,12 +91,131 @@ class AwbUploadsImport implements ToModel, WithHeadingRow, WithStartRow, SkipsEm
             return null; // Skip rows without AWB number
         }
 
-        // Clean AWB number (remove special characters)
-        $awbNo = preg_replace('/[^a-zA-Z0-9]/', '', $awbNo);
+        // Clean AWB number (trim but preserve special characters)
+        $awbNo = trim($awbNo);
+        
+        // Skip if AWB number is empty after trimming
+        if (empty($awbNo)) {
+            return null;
+        }
 
-        // Check if AWB already exists
-        if (AwbUpload::where('awb_no', $awbNo)->exists()) {
-            return null; // Skip duplicate
+        // REAL-TIME duplicate check - Direct database query (no caching)
+        // Check if AWB number already exists in database (case-sensitive, exact match)
+        // Use fresh query to ensure we're getting the latest data from database
+        $existingAwb = AwbUpload::where('awb_no', $awbNo)->first();
+        if ($existingAwb) {
+            // Log for debugging
+            \Log::info("Duplicate AWB check in import - Found existing AWB: ID={$existingAwb->id}, AWB_No={$awbNo}");
+            // Throw exception with clear error message instead of silently skipping
+            throw new \Exception("AWB No. '{$awbNo}' already exists in the system (ID: {$existingAwb->id}). Duplicate AWB numbers are not allowed. Please use a different AWB number or delete the existing one first.");
+        }
+
+        // Get values for validation
+        $networkName = $this->getValue($row, ['networknam', 'network_name', 'network name']);
+        $serviceName = $this->getValue($row, ['servicename', 'service_name', 'service name']);
+        $origin = $this->getValue($row, ['origin']);
+        $originZone = $this->getValue($row, ['origin_zone', 'origin zone']);
+        $originZonePincode = $this->getValue($row, ['origin_zone_pincode', 'origin_zone_pincode', 'origin zone pincode']);
+        $destination = $this->getValue($row, ['destination']);
+        $destinationZone = $this->getValue($row, ['destination_zone', 'destination zone']);
+        $destinationZonePincode = $this->getValue($row, ['destination_zone_pincode', 'destination zone pincode']);
+
+        // ALL VALIDATIONS MUST PASS - if any fails, skip this row
+        
+        // Validate network exists (REQUIRED)
+        if (empty($networkName)) {
+            throw new \Exception("Network name is required for AWB '{$awbNo}'. Please provide a network name.");
+        }
+        $network = Network::whereRaw('LOWER(name) = LOWER(?)', [$networkName])->where('status', 'Active')->first();
+        if (!$network) {
+            throw new \Exception("Network '{$networkName}' does not exist or is not active for AWB '{$awbNo}'. Please create the network first.");
+        }
+
+        // Validate service exists and belongs to network (REQUIRED)
+        if (empty($serviceName)) {
+            throw new \Exception("Service name is required for AWB '{$awbNo}'. Please provide a service name.");
+        }
+        $service = Service::whereRaw('LOWER(name) = LOWER(?)', [$serviceName])
+            ->where('status', 'Active')
+            ->first();
+        if (!$service) {
+            throw new \Exception("Service '{$serviceName}' does not exist or is not active for AWB '{$awbNo}'. Please create the service first.");
+        }
+        // Check if service belongs to network (case-insensitive)
+        if (isset($service->network) && strcasecmp(trim($service->network), trim($networkName)) !== 0) {
+            throw new \Exception("Service '{$serviceName}' does not belong to network '{$networkName}' for AWB '{$awbNo}'. Service belongs to network '{$service->network}'.");
+        }
+
+        // Validate origin country exists (REQUIRED)
+        if (empty($origin)) {
+            throw new \Exception("Origin country is required for AWB '{$awbNo}'. Please provide an origin country.");
+        }
+        $originCountry = Country::whereRaw('LOWER(name) = LOWER(?)', [$origin])->where('status', 'Active')->first();
+        if (!$originCountry) {
+            throw new \Exception("Origin country '{$origin}' does not exist or is not active for AWB '{$awbNo}'. Please create the country first.");
+        }
+
+        // Validate destination country exists (REQUIRED)
+        if (empty($destination)) {
+            throw new \Exception("Destination country is required for AWB '{$awbNo}'. Please provide a destination country.");
+        }
+        $destinationCountry = Country::whereRaw('LOWER(name) = LOWER(?)', [$destination])->where('status', 'Active')->first();
+        if (!$destinationCountry) {
+            throw new \Exception("Destination country '{$destination}' does not exist or is not active for AWB '{$awbNo}'. Please create the country first.");
+        }
+
+        // Validate origin zone exists (REQUIRED)
+        if (empty($originZone)) {
+            throw new \Exception("Origin zone is required for AWB '{$awbNo}'. Please provide an origin zone.");
+        }
+        $originZoneExists = DB::table('zones')
+            ->whereRaw('LOWER(country) = LOWER(?)', [$origin])
+            ->whereRaw('LOWER(zone) = LOWER(?)', [$originZone])
+            ->where('status', 'Active')
+            ->exists();
+        if (!$originZoneExists) {
+            throw new \Exception("Origin zone '{$originZone}' does not exist for country '{$origin}' for AWB '{$awbNo}'. Please create the zone first.");
+        }
+
+        // Validate origin zone pincode exists (REQUIRED)
+        if (empty($originZonePincode)) {
+            throw new \Exception("Origin zone pincode is required for AWB '{$awbNo}'. Please provide an origin zone pincode.");
+        }
+        $originPincodeExists = DB::table('zones')
+            ->whereRaw('LOWER(country) = LOWER(?)', [$origin])
+            ->whereRaw('LOWER(zone) = LOWER(?)', [$originZone])
+            ->where('pincode', $originZonePincode)
+            ->where('status', 'Active')
+            ->exists();
+        if (!$originPincodeExists) {
+            throw new \Exception("Origin zone pincode '{$originZonePincode}' does not exist for zone '{$originZone}' in country '{$origin}' for AWB '{$awbNo}'. Please create the pincode first.");
+        }
+
+        // Validate destination zone exists (REQUIRED)
+        if (empty($destinationZone)) {
+            throw new \Exception("Destination zone is required for AWB '{$awbNo}'. Please provide a destination zone.");
+        }
+        $destinationZoneExists = DB::table('zones')
+            ->whereRaw('LOWER(country) = LOWER(?)', [$destination])
+            ->whereRaw('LOWER(zone) = LOWER(?)', [$destinationZone])
+            ->where('status', 'Active')
+            ->exists();
+        if (!$destinationZoneExists) {
+            throw new \Exception("Destination zone '{$destinationZone}' does not exist for country '{$destination}' for AWB '{$awbNo}'. Please create the zone first.");
+        }
+
+        // Validate destination zone pincode exists (REQUIRED)
+        if (empty($destinationZonePincode)) {
+            throw new \Exception("Destination zone pincode is required for AWB '{$awbNo}'. Please provide a destination zone pincode.");
+        }
+        $destinationPincodeExists = DB::table('zones')
+            ->whereRaw('LOWER(country) = LOWER(?)', [$destination])
+            ->whereRaw('LOWER(zone) = LOWER(?)', [$destinationZone])
+            ->where('pincode', $destinationZonePincode)
+            ->where('status', 'Active')
+            ->exists();
+        if (!$destinationPincodeExists) {
+            throw new \Exception("Destination zone pincode '{$destinationZonePincode}' does not exist for zone '{$destinationZone}' in country '{$destination}' for AWB '{$awbNo}'. Please create the pincode first.");
         }
 
         return new AwbUpload([

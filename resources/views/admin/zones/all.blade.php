@@ -152,7 +152,7 @@
             Search & Filter
         </h2>
         
-        <form method="GET" action="{{ route('admin.zones.all') }}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <form method="GET" action="{{ route('admin.zones.all') }}" class="grid grid-cols-1 md:grid-cols-5 gap-4">
             <!-- Pincode Search -->
             <div>
                 <label class="block text-xs font-semibold text-gray-700 mb-2">
@@ -176,6 +176,22 @@
                     <option value="">All Networks</option>
                     @foreach($networks ?? [] as $network)
                         <option value="{{ $network['name'] }}" {{ ($searchParams['network'] ?? '') == $network['name'] ? 'selected' : '' }}>{{ $network['name'] }}</option>
+                    @endforeach
+                </select>
+            </div>
+            
+            <!-- Country Filter -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">
+                    <svg class="w-3.5 h-3.5 text-orange-600 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 002 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Country
+                </label>
+                <select name="country" class="search-select">
+                    <option value="">All Countries</option>
+                    @foreach($countries ?? [] as $country)
+                        <option value="{{ $country['name'] }}" {{ ($searchParams['country'] ?? '') == $country['name'] ? 'selected' : '' }}>{{ $country['name'] }}</option>
                     @endforeach
                 </select>
             </div>
@@ -205,7 +221,7 @@
                         <span>Search</span>
                     </div>
                 </button>
-                @if($searchParams['search'] ?? '' || $searchParams['network'] ?? '' || $searchParams['status'] ?? '')
+                @if($searchParams['search'] ?? '' || $searchParams['network'] ?? '' || $searchParams['country'] ?? '' || $searchParams['status'] ?? '')
                     <a href="{{ route('admin.zones.all') }}" class="px-4 py-2.5 rounded-lg border-2 border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition text-sm">
                         Clear
                     </a>
@@ -248,6 +264,368 @@
                 </div>
                 <p class="text-green-700 font-bold text-sm">{{ session('success') }}</p>
             </div>
+        @endif
+
+        @if(session('error'))
+            @php
+                $errorText = session('error');
+                $errors = explode("\n", $errorText);
+                $errors = array_filter($errors, function($error) {
+                    return !empty(trim($error));
+                });
+                $summary = '';
+                $errorList = [];
+                
+                // Separate summary from error list
+                foreach ($errors as $error) {
+                    $trimmed = trim($error);
+                    if (strpos($trimmed, 'Found') !== false && strpos($trimmed, 'error(s)') !== false) {
+                        $summary = $trimmed;
+                    } else {
+                        $errorList[] = $trimmed;
+                    }
+                }
+                $totalErrors = count($errorList);
+            @endphp
+            
+            <div id="errorModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" style="display: flex; position: fixed; top: 0; left: 0; right: 0; bottom: 0; animation: fadeIn 0.2s ease-out;">
+                <div class="bg-white rounded-lg shadow-2xl w-full max-w-2xl mx-4 flex flex-col" style="max-height: 80vh; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); position: relative; animation: slideUp 0.3s ease-out;">
+                    <!-- Modal Header - Fixed at top -->
+                    <div class="bg-gradient-to-r from-red-500 to-red-600 px-5 py-4 flex items-center justify-between rounded-t-lg flex-shrink-0">
+                        <div class="flex items-center gap-3">
+                            <div class="w-9 h-9 rounded-full bg-white bg-opacity-20 flex items-center justify-center flex-shrink-0">
+                                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-white">Import Validation Failed</h3>
+                                <p class="text-xs text-red-100">Found {{ $totalErrors }} error(s) - Please review and fix</p>
+                            </div>
+                        </div>
+                        <button onclick="closeErrorModal()" class="text-white hover:text-red-200 transition p-1.5 rounded-lg hover:bg-white hover:bg-opacity-10 flex-shrink-0">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <!-- Modal Body - Scrollable middle section -->
+                    <div class="flex-1 overflow-hidden flex flex-col bg-gray-50 min-h-0">
+                        <!-- Summary Banner - Fixed -->
+                        <div class="bg-red-50 border-b border-red-200 px-5 py-3 flex-shrink-0">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-5 h-5 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                </svg>
+                                <p class="text-sm font-semibold text-red-800">No zones were imported. All errors must be resolved before importing.</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Error List Container - Scrollable -->
+                        <div class="flex-1 overflow-hidden px-5 py-4 min-h-0">
+                            <div class="bg-white rounded-lg border border-gray-200 shadow-sm h-full flex flex-col">
+                                <!-- Error List Header - Fixed -->
+                                <div class="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between flex-shrink-0">
+                                    <div class="flex items-center gap-2">
+                                        <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                        </svg>
+                                        <span class="text-xs font-semibold text-gray-700 uppercase tracking-wide">Error Details ({{ $totalErrors }} total)</span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 font-medium">
+                                        <span id="visibleCount">{{ min($totalErrors, 20) }}</span> / {{ $totalErrors }} visible
+                                    </div>
+                                </div>
+                                
+                                <!-- Scrollable Error List -->
+                                <div class="flex-1 overflow-y-auto min-h-0" id="errorScrollContainer">
+                                    <div class="divide-y divide-gray-100">
+                                        @foreach($errorList as $index => $error)
+                                            <div class="px-4 py-3 hover:bg-red-50 transition-colors">
+                                                <div class="flex items-start gap-3">
+                                                    <div class="flex-shrink-0 mt-0.5">
+                                                        <div class="w-6 h-6 rounded-full bg-red-100 flex items-center justify-center">
+                                                            <span class="text-xs font-bold text-red-600">{{ $index + 1 }}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="flex-1 min-w-0">
+                                                        <p class="text-sm text-gray-800 leading-relaxed break-words">{{ $error }}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                                
+                                <!-- Scroll Indicator - Fixed at bottom of scroll area -->
+                                @if($totalErrors > 20)
+                                <div class="px-4 py-2 border-t border-gray-200 bg-gray-50 text-center flex-shrink-0">
+                                    <p class="text-xs text-gray-500">Scroll down to see all {{ $totalErrors }} errors</p>
+                                </div>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Modal Footer - Fixed at bottom -->
+                    <div class="bg-white border-t border-gray-200 px-5 py-4 rounded-b-lg flex items-center justify-between flex-shrink-0">
+                        <div class="text-xs text-gray-500">
+                            <span class="font-medium">{{ $totalErrors }}</span> error(s) found
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button onclick="closeErrorModal()" class="px-5 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition">
+                                Close
+                            </button>
+                            <button onclick="closeErrorModal()" class="px-5 py-2 text-sm font-semibold text-white bg-orange-600 rounded-lg hover:bg-orange-700 transition shadow-sm">
+                                I Understand
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <style>
+                @keyframes fadeIn {
+                    from {
+                        opacity: 0;
+                    }
+                    to {
+                        opacity: 1;
+                    }
+                }
+                
+                @keyframes slideUp {
+                    from {
+                        transform: translateY(20px);
+                        opacity: 0;
+                    }
+                    to {
+                        transform: translateY(0);
+                        opacity: 1;
+                    }
+                }
+                
+                @keyframes fadeOut {
+                    from {
+                        opacity: 1;
+                    }
+                    to {
+                        opacity: 0;
+                    }
+                }
+                
+                #errorModal {
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    bottom: 0 !important;
+                    z-index: 9999 !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    background: rgba(0, 0, 0, 0.5) !important;
+                    backdrop-filter: blur(2px);
+                    pointer-events: auto !important;
+                    overflow: auto !important;
+                    padding: 20px !important;
+                }
+                
+                #errorModal.closing {
+                    animation: fadeOut 0.2s ease-out forwards;
+                }
+                
+                #errorModal > div {
+                    position: relative !important;
+                    transform: translateZ(0) !important;
+                    backface-visibility: hidden !important;
+                    pointer-events: auto !important;
+                    will-change: auto !important;
+                    max-height: 80vh !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    width: 100% !important;
+                    max-width: 42rem !important;
+                    margin: auto !important;
+                }
+                
+                /* Prevent any movement or flickering */
+                #errorModal * {
+                    pointer-events: auto;
+                }
+                
+                /* Ensure modal has proper height constraints */
+                #errorModal > div {
+                    height: auto !important;
+                    max-height: 85vh !important;
+                }
+                
+                /* Error scroll container - main scrollable area */
+                #errorScrollContainer {
+                    scrollbar-width: thin;
+                    scrollbar-color: #cbd5e1 #f1f1f1;
+                    overflow-y: auto !important;
+                    overflow-x: hidden !important;
+                    flex: 1 1 0% !important;
+                    min-height: 0 !important;
+                    max-height: 100% !important;
+                    height: 0 !important; /* Force flexbox to calculate height */
+                }
+                
+                #errorScrollContainer::-webkit-scrollbar {
+                    width: 10px;
+                }
+                
+                #errorScrollContainer::-webkit-scrollbar-track {
+                    background: #f1f5f9;
+                    border-radius: 6px;
+                    margin: 4px;
+                }
+                
+                #errorScrollContainer::-webkit-scrollbar-thumb {
+                    background: #cbd5e1;
+                    border-radius: 6px;
+                    border: 2px solid #f1f5f9;
+                }
+                
+                #errorScrollContainer::-webkit-scrollbar-thumb:hover {
+                    background: #94a3b8;
+                }
+                
+                /* Prevent flickering on hover */
+                #errorModal .hover\:bg-red-50:hover {
+                    background-color: #fef2f2;
+                    transition: background-color 0.15s ease-in-out;
+                }
+                
+                /* Ensure header and footer are always visible and fixed */
+                #errorModal > div > div:first-child,
+                #errorModal > div > div:last-child {
+                    flex-shrink: 0 !important;
+                    position: relative !important;
+                }
+                
+                /* Ensure modal body section is properly constrained */
+                #errorModal > div > div:nth-child(2) {
+                    flex: 1 1 0% !important;
+                    min-height: 0 !important;
+                    max-height: 100% !important;
+                    overflow: hidden !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                }
+                
+                /* Ensure error list wrapper has proper constraints */
+                #errorModal > div > div:nth-child(2) > div:last-child {
+                    flex: 1 1 0% !important;
+                    min-height: 0 !important;
+                    max-height: 100% !important;
+                    overflow: hidden !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                }
+                
+                /* Ensure white container inside has proper height */
+                #errorModal > div > div:nth-child(2) > div:last-child > div {
+                    height: 100% !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    min-height: 0 !important;
+                }
+            </style>
+            
+            <script>
+                (function() {
+                    'use strict';
+                    
+                    let isScrolling = false;
+                    let scrollTimeout = null;
+                    
+                    function closeErrorModal() {
+                        const modal = document.getElementById('errorModal');
+                        if (modal) {
+                            // Add closing animation
+                            modal.classList.add('closing');
+                            // Remove modal after animation
+                            setTimeout(function() {
+                                modal.style.display = 'none';
+                                modal.classList.remove('closing');
+                                // Clean up event listeners
+                                document.removeEventListener('keydown', handleEscapeKey);
+                                // Remove modal from DOM
+                                modal.remove();
+                            }, 200);
+                        }
+                    }
+                    
+                    function handleEscapeKey(e) {
+                        if (e.key === 'Escape') {
+                            closeErrorModal();
+                        }
+                    }
+                    
+                    function handleOutsideClick(e) {
+                        const modal = document.getElementById('errorModal');
+                        if (modal && e.target === modal) {
+                            closeErrorModal();
+                        }
+                    }
+                    
+                    function updateVisibleCount() {
+                        if (isScrolling) return;
+                        
+                        const scrollContainer = document.getElementById('errorScrollContainer');
+                        const visibleCountEl = document.getElementById('visibleCount');
+                        
+                        if (!scrollContainer || !visibleCountEl) return;
+                        
+                        const container = scrollContainer;
+                        const scrollTop = container.scrollTop;
+                        const containerHeight = container.clientHeight;
+                        const itemHeight = 60; // Approximate height per error item
+                        const visibleItems = Math.ceil((scrollTop + containerHeight) / itemHeight);
+                        const totalItems = {{ $totalErrors }};
+                        
+                        visibleCountEl.textContent = Math.min(Math.max(visibleItems, 1), totalItems);
+                    }
+                    
+                    // Throttled scroll handler
+                    function handleScroll() {
+                        if (!isScrolling) {
+                            isScrolling = true;
+                            updateVisibleCount();
+                            
+                            if (scrollTimeout) {
+                                clearTimeout(scrollTimeout);
+                            }
+                            
+                            scrollTimeout = setTimeout(function() {
+                                isScrolling = false;
+                            }, 100);
+                        }
+                    }
+                    
+                    // Initialize modal
+                    document.addEventListener('DOMContentLoaded', function() {
+                        const modal = document.getElementById('errorModal');
+                        if (modal) {
+                            // Add event listeners
+                            document.addEventListener('keydown', handleEscapeKey);
+                            modal.addEventListener('click', handleOutsideClick, { passive: true });
+                            
+                            const scrollContainer = document.getElementById('errorScrollContainer');
+                            if (scrollContainer) {
+                                scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+                                updateVisibleCount();
+                            }
+                        }
+                    });
+                    
+                    // Make closeErrorModal available globally
+                    window.closeErrorModal = closeErrorModal;
+                })();
+            </script>
         @endif
 
         <form id="bulkDeleteForm" method="POST" action="{{ route('admin.zones.bulk-delete') }}">
