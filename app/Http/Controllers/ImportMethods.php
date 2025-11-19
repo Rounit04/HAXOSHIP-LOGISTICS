@@ -8,6 +8,7 @@ use App\Imports\CountriesImport;
 use App\Imports\ZonesImport;
 use App\Imports\BookingCategoriesImport;
 use App\Imports\ShippingChargesImport;
+use App\Imports\ShippingChargesUpdateImport;
 use App\Imports\BanksImport;
 use App\Models\Network;
 use App\Models\BookingCategory;
@@ -443,6 +444,17 @@ trait ImportMethods
         return $this->downloadCsvTemplate($headers, $data, 'shipping_charges_template.csv');
     }
 
+    public function downloadShippingChargeUpdateTemplate()
+    {
+        $headers = ['Origin', 'Origin Zone', 'Destination', 'Destination Zone', 'Network', 'Service', 'Rate', 'Remark'];
+        $data = [
+            ['India', 'Zone A', 'USA', 'Zone 1', 'FedEx', 'Economy', '450', 'Updated rate for peak season'],
+            ['India', 'No Zone', 'India', 'No Zone', 'DTDC', 'Express', '120', ''],
+        ];
+
+        return $this->downloadCsvTemplate($headers, $data, 'shipping_charges_update_template.csv');
+    }
+
     public function importBanks(Request $request)
     {
         $request->validate([
@@ -457,6 +469,149 @@ trait ImportMethods
             return redirect()->route('admin.banks.all')
                 ->with('success', "Bulk import completed! Bank(s) imported successfully.");
         } catch (\Exception $e) {
+            return redirect()->back()
+                ->with('error', 'Error importing Excel file: ' . $e->getMessage());
+        }
+    }
+
+    public function importShippingChargeUpdates(Request $request)
+    {
+        if (!$request->hasFile('update_file')) {
+            if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No file was uploaded.',
+                    'errors' => ['Please select a file to upload.'],
+                ], 422);
+            }
+            return redirect()->back()->with('error', 'No file was uploaded. Please select a file to import.');
+        }
+
+        try {
+            $request->validate([
+                'update_file' => 'required|mimes:xlsx,xls,csv|max:20480',
+            ], [
+                'update_file.required' => 'Please select a file to upload.',
+                'update_file.mimes' => 'The file must be an Excel file (.xlsx, .xls) or CSV file (.csv).',
+                'update_file.max' => 'The file size must not exceed 20MB.',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                $errorMessages = [];
+                foreach ($e->errors() as $fieldErrors) {
+                    foreach ($fieldErrors as $error) {
+                        $errorMessages[] = $error;
+                    }
+                }
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed. Please check your file.',
+                    'errors' => $errorMessages,
+                ], 422);
+            }
+            throw $e;
+        }
+
+        try {
+            ini_set('memory_limit', '512M');
+            ini_set('max_execution_time', '420');
+
+            $file = $request->file('update_file');
+
+            if (!$file || !$file->isValid()) {
+                $errorMsg = 'The uploaded file is invalid or could not be read.';
+                if ($file && $file->getError() !== UPLOAD_ERR_OK) {
+                    $uploadErrors = [
+                        UPLOAD_ERR_INI_SIZE => 'The uploaded file exceeds the upload_max_filesize directive in php.ini.',
+                        UPLOAD_ERR_FORM_SIZE => 'The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form.',
+                        UPLOAD_ERR_PARTIAL => 'The uploaded file was only partially uploaded.',
+                        UPLOAD_ERR_NO_FILE => 'No file was uploaded.',
+                        UPLOAD_ERR_NO_TMP_DIR => 'Missing a temporary folder.',
+                        UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
+                        UPLOAD_ERR_EXTENSION => 'A PHP extension stopped the file upload.',
+                    ];
+                    $errorMsg = $uploadErrors[$file->getError()] ?? $errorMsg;
+                }
+
+                if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => $errorMsg,
+                        'errors' => [$errorMsg],
+                    ], 422);
+                }
+                throw new \Exception($errorMsg);
+            }
+
+            $import = new ShippingChargesUpdateImport();
+            Excel::import($import, $file);
+
+            $hasErrors = !empty($import->errors);
+            $updatedCount = $import->updatedCount;
+
+            if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                if ($hasErrors) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Found " . count($import->errors) . " error(s) in your file.",
+                        'errors' => $import->errors,
+                    ], 422);
+                }
+
+                if ($updatedCount > 0) {
+                    return response()->json([
+                        'success' => true,
+                        'message' => "Successfully updated {$updatedCount} shipping charge(s).",
+                        'updated_count' => $updatedCount,
+                        'redirect' => route('admin.shipping-charges.all'),
+                    ]);
+                }
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No shipping charges were updated. Please ensure the file has matching records and at least one updatable field.',
+                    'errors' => ['The file appears to have no matching shipping charges or updateable fields.'],
+                ], 422);
+            }
+
+            if ($hasErrors) {
+                $totalErrors = count($import->errors);
+                $summary = "Found {$totalErrors} error(s) in your file. Please fix all errors before importing.\n\n";
+                $errorMessage = $summary . implode("\n", $import->errors);
+
+                return redirect()->route('admin.shipping-charges.all')
+                    ->with('error', $errorMessage)
+                    ->with('import_failed', true);
+            }
+
+            if ($updatedCount > 0) {
+                return redirect()->route('admin.shipping-charges.all')
+                    ->with('success', "✅ Bulk update completed successfully! {$updatedCount} shipping charge(s) updated.");
+            }
+
+            return redirect()->route('admin.shipping-charges.all')
+                ->with('error', 'No shipping charges were updated. Please check your file and try again.');
+        } catch (\Exception $e) {
+            \Log::error('Shipping charge update import error: ' . $e->getMessage(), [
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                $errorMessage = $e->getMessage();
+                if (config('app.debug')) {
+                    $errorMessage .= ' (File: ' . basename($e->getFile()) . ', Line: ' . $e->getLine() . ')';
+                }
+
+                return response()->json([
+                    'success' => false,
+                    'message' => $errorMessage,
+                    'errors' => [$errorMessage],
+                ], 500);
+            }
+
             return redirect()->back()
                 ->with('error', 'Error importing Excel file: ' . $e->getMessage());
         }

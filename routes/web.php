@@ -224,6 +224,8 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::post('/shipping-charges/bulk-delete', [AdminController::class, 'bulkDeleteShippingCharges'])->name('shipping-charges.bulk-delete');
     Route::post('/shipping-charges/import', [AdminController::class, 'importShippingCharges'])->name('shipping-charges.import');
     Route::get('/shipping-charges/template/download', [AdminController::class, 'downloadShippingChargeTemplate'])->name('shipping-charges.template.download');
+    Route::post('/shipping-charges/update-file', [AdminController::class, 'importShippingChargeUpdates'])->name('shipping-charges.import-updates');
+    Route::get('/shipping-charges/update-template/download', [AdminController::class, 'downloadShippingChargeUpdateTemplate'])->name('shipping-charges.update-template.download');
     Route::get('/formulas', [AdminController::class, 'formulas'])->name('formulas');
     Route::get('/formulas/create', [AdminController::class, 'createFormula'])->name('formulas.create');
     Route::get('/formulas/all', [AdminController::class, 'allFormulas'])->name('formulas.all');

@@ -351,6 +351,47 @@
         </form>
     </div>
 
+    <!-- Bulk Update Section -->
+    <div class="form-card p-6 mb-6" style="background: linear-gradient(135deg, #f0faff 0%, #e0f2ff 100%); border: 2px solid rgba(14, 165, 233, 0.2);">
+        <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="text-lg font-bold text-gray-900">Bulk Update Shipping Charges</h2>
+                    <p class="text-sm text-gray-600">Upload an Excel/CSV file to update rate or remark for existing charges</p>
+                </div>
+            </div>
+            <a href="{{ route('admin.shipping-charges.update-template.download') }}" class="admin-btn-secondary px-4 py-2 text-sm flex items-center justify-center gap-2">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Download Update Template
+            </a>
+        </div>
+        <div class="bg-white rounded-lg p-4 border border-blue-100 text-sm text-gray-600 mb-4">
+            <ul class="list-disc pl-5 space-y-1">
+                <li>Only the <strong>Rate</strong> and <strong>Remark</strong> columns will be updated.</li>
+                <li>Origin, Destination, both Zones, Network, and Service are used to find the existing record.</li>
+                <li>If no rate is supplied the previous rate remains unchanged.</li>
+                <li>Leave remark blank to clear it or omit the column to keep the previous remark.</li>
+            </ul>
+        </div>
+        <form id="updateForm" method="POST" action="{{ route('admin.shipping-charges.import-updates') }}" enctype="multipart/form-data" class="flex flex-col md:flex-row md:items-center gap-3">
+            @csrf
+            <input type="file" name="update_file" id="update_file" accept=".xlsx,.xls,.csv" required class="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-sky-500">
+            <button type="submit" id="updateBtn" class="admin-btn-secondary px-6 py-2 flex items-center justify-center gap-2">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+                Update from File
+            </button>
+        </form>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- Shipping Charge Form -->
         <div class="lg:col-span-2">
@@ -1031,6 +1072,31 @@
             visibleCountEl.textContent = Math.min(Math.max(visibleItems, 1), totalItems);
         }
 
+        function ensureFileSelected(form, fileInput, submitButton) {
+            if (!fileInput) {
+                return false;
+            }
+
+            if (fileInput.files && fileInput.files[0]) {
+                return false;
+            }
+
+            const resubmitIfChosen = () => {
+                fileInput.removeEventListener('change', resubmitIfChosen);
+                if (fileInput.files && fileInput.files[0]) {
+                    if (typeof form.requestSubmit === 'function') {
+                        form.requestSubmit(submitButton || null);
+                    } else {
+                        form.submit();
+                    }
+                }
+            };
+
+            fileInput.addEventListener('change', resubmitIfChosen, { once: true });
+            fileInput.click();
+            return true;
+        }
+
         // Handle import form submission with AJAX
         document.getElementById('importForm')?.addEventListener('submit', function(e) {
             e.preventDefault();
@@ -1038,10 +1104,8 @@
             const form = this;
             const fileInput = document.getElementById('excel_file');
             const importBtn = document.getElementById('importBtn');
-            
-            // Check if file is selected
-            if (!fileInput.files || !fileInput.files[0]) {
-                showErrorModal(['Please select a file to import.']);
+
+            if (ensureFileSelected(form, fileInput, importBtn)) {
                 return;
             }
             
@@ -1053,13 +1117,20 @@
                 return;
             }
             
-            const formData = new FormData(form);
+            const formData = new FormData();
             const originalButtonText = importBtn.innerHTML;
             
-            // Ensure CSRF token is included
-            const csrfToken = document.querySelector('input[name="_token"]');
-            if (csrfToken) {
-                formData.append('_token', csrfToken.value);
+            // Manually append file to avoid browsers dropping it when using new FormData(form)
+            formData.append('excel_file', file);
+            
+            // Append CSRF token (prefer token inside this form, fallback to global)
+            const formCsrf = form.querySelector('input[name="_token"]');
+            const globalCsrf = document.querySelector('meta[name="csrf-token"]');
+            const csrfValue = formCsrf ? formCsrf.value : (globalCsrf ? globalCsrf.content : '');
+            if (formCsrf) {
+                formData.append('_token', formCsrf.value);
+            } else if (globalCsrf) {
+                formData.append('_token', globalCsrf.content);
             }
             
             // Disable submit button and show loading state
@@ -1073,7 +1144,7 @@
                 headers: {
                     'X-Requested-With': 'XMLHttpRequest',
                     'Accept': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken ? csrfToken.value : ''
+                    'X-CSRF-TOKEN': csrfValue
                 }
             })
             .then(response => {
@@ -1213,6 +1284,153 @@
                 showErrorModal([errorMsg]);
                 importBtn.disabled = false;
                 importBtn.innerHTML = originalButtonText;
+            });
+        });
+
+        // Handle update form submission
+        document.getElementById('updateForm')?.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const form = this;
+            const fileInput = document.getElementById('update_file');
+            const updateBtn = document.getElementById('updateBtn');
+
+            if (ensureFileSelected(form, fileInput, updateBtn)) {
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const maxSize = 20 * 1024 * 1024; // 20MB
+            if (file.size > maxSize) {
+                showErrorModal([`File size exceeds the maximum allowed size of 20MB. Your file is ${(file.size / (1024 * 1024)).toFixed(2)}MB.`]);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('update_file', file);
+
+            const formCsrf = form.querySelector('input[name="_token"]');
+            const globalCsrf = document.querySelector('meta[name="csrf-token"]');
+            const csrfValue = formCsrf ? formCsrf.value : (globalCsrf ? globalCsrf.content : '');
+            if (formCsrf) {
+                formData.append('_token', formCsrf.value);
+            } else if (globalCsrf) {
+                formData.append('_token', globalCsrf.content);
+            }
+
+            updateBtn.disabled = true;
+            const originalButtonText = updateBtn.innerHTML;
+            updateBtn.innerHTML = '<svg class="animate-spin h-4 w-4 text-white inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Updating...';
+
+            fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfValue
+                }
+            })
+            .then(response => {
+                if (!response.ok && response.status !== 422 && response.status !== 500) {
+                    return response.text().then(text => {
+                        throw new Error(`Server error: ${response.status} - ${response.statusText}`);
+                    });
+                }
+
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    return response.json().then(data => {
+                        return { status: response.status, data: data };
+                    }).catch(() => response.text().then(text => {
+                        return { status: response.status, data: { success: false, message: text || 'Invalid response from server' } };
+                    }));
+                }
+
+                return response.text().then(text => {
+                    if (response.redirected || (response.ok && response.status >= 200 && response.status < 300)) {
+                        return { status: response.status, redirected: true, text: text };
+                    }
+                    return { status: response.status, data: { success: false, message: text || 'An error occurred' } };
+                });
+            })
+            .then(result => {
+                if (result.redirected) {
+                    showSuccessPopup('Shipping charges updated successfully!');
+                    form.reset();
+                    setTimeout(() => {
+                        window.location.href = '{{ route("admin.shipping-charges.all") }}';
+                    }, 1500);
+                } else if (result.data) {
+                    if (result.data.success) {
+                        const message = result.data.message || `Successfully updated ${result.data.updated_count || 0} shipping charge(s)!`;
+                        showSuccessPopup(message);
+                        form.reset();
+                        setTimeout(() => {
+                            if (result.data.redirect) {
+                                window.location.href = result.data.redirect;
+                            } else {
+                                window.location.href = '{{ route("admin.shipping-charges.all") }}';
+                            }
+                        }, 1500);
+                    } else {
+                        let errorList = [];
+                        if (result.data.errors) {
+                            if (Array.isArray(result.data.errors)) {
+                                errorList = result.data.errors;
+                            } else if (typeof result.data.errors === 'object') {
+                                Object.keys(result.data.errors).forEach(key => {
+                                    const fieldErrors = Array.isArray(result.data.errors[key])
+                                        ? result.data.errors[key]
+                                        : [result.data.errors[key]];
+                                    fieldErrors.forEach(err => errorList.push(err));
+                                });
+                            } else if (typeof result.data.errors === 'string') {
+                                errorList = [result.data.errors];
+                            }
+                        }
+
+                        if (errorList.length === 0 && result.data.message) {
+                            errorList = [result.data.message];
+                        }
+
+                        if (errorList.length > 0) {
+                            showErrorModal(errorList);
+                        } else {
+                            alert('An error occurred while updating shipping charges. Please check the console for details.');
+                            console.error('Update error response:', result.data);
+                        }
+
+                        updateBtn.disabled = false;
+                        updateBtn.innerHTML = originalButtonText;
+                    }
+                } else {
+                    showErrorModal(['Unexpected response from server. Please try again.']);
+                    updateBtn.disabled = false;
+                    updateBtn.innerHTML = originalButtonText;
+                }
+            })
+            .catch(error => {
+                console.error('Update Upload Error:', error);
+                let errorMsg = 'Failed to upload file. ';
+
+                if (error.message) {
+                    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                        errorMsg = 'Network error: Could not connect to server. Please check your internet connection and try again.';
+                    } else if (error.message.includes('Server error')) {
+                        errorMsg = error.message;
+                    } else if (error.message.includes('timeout') || error.message.includes('Timeout')) {
+                        errorMsg = 'Upload timeout: The file is too large or the server is taking too long to respond. Please try a smaller file or contact support.';
+                    } else {
+                        errorMsg += error.message;
+                    }
+                } else {
+                    errorMsg += 'Please check your file and try again. If the problem persists, the file may be corrupted or too large.';
+                }
+
+                showErrorModal([errorMsg]);
+                updateBtn.disabled = false;
+                updateBtn.innerHTML = originalButtonText;
             });
         });
     </script>

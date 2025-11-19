@@ -319,13 +319,16 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                 $destinationDisplay = !empty($destination) ? "'{$destination}'" : 'Unknown';
                 $this->errors[] = "Row {$this->rowNumber} (Origin: {$originDisplay}, Destination: {$destinationDisplay}): " . implode(', ', $rowErrors);
             } else {
-                // Row is valid, store it for import
+                // Row is valid, store it for import (normalize zone placeholders)
+                $normalizedOriginZone = $this->normalizeZoneValue($originZone);
+                $normalizedDestinationZone = $this->normalizeZoneValue($destinationZone);
+                
                 $this->validRows[] = [
                     'row_number' => $this->rowNumber,
                     'origin' => $origin,
-                    'origin_zone' => $originZone,
+                    'origin_zone' => $normalizedOriginZone,
                     'destination' => $destination,
-                    'destination_zone' => $destinationZone,
+                    'destination_zone' => $normalizedDestinationZone,
                     'shipment_type' => $shipmentType,
                     'min_weight' => $minWeight,
                     'max_weight' => $maxWeight,
@@ -352,22 +355,27 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                 // Get count of existing records to decide strategy
                 $existingCount = ShippingCharge::count();
                 
-                // Helper function to normalize key values (handle NULL, trim whitespace)
-                $normalizeKeyValue = function($value) {
-                    if ($value === null || $value === '') {
-                        return '';
+                // Helper to normalize text/zone values
+                $normalizeValue = function($value, $isZone = false) {
+                    if ($isZone) {
+                        return $this->normalizeZoneValue($value);
                     }
-                    return trim((string)$value);
+                    return $this->normalizeStringValue($value);
                 };
                 
-                // Helper function to create a consistent key for duplicate checking
-                $createKey = function($origin, $destination, $originZone, $destinationZone, $network, $service) use ($normalizeKeyValue) {
-                    return $normalizeKeyValue($origin) . '|' . 
-                           $normalizeKeyValue($destination) . '|' . 
-                           $normalizeKeyValue($originZone) . '|' . 
-                           $normalizeKeyValue($destinationZone) . '|' . 
-                           $normalizeKeyValue($network) . '|' . 
-                           $normalizeKeyValue($service);
+                $keyPart = function($value, $isZone = false) use ($normalizeValue) {
+                    $normalized = $normalizeValue($value, $isZone);
+                    return $normalized === '' ? '' : mb_strtolower($normalized);
+                };
+                
+                // Helper function to create a consistent key for duplicate checking (case-insensitive, trimmed)
+                $createKey = function($origin, $destination, $originZone, $destinationZone, $network, $service) use ($keyPart) {
+                    return $keyPart($origin) . '|' . 
+                           $keyPart($destination) . '|' . 
+                           $keyPart($originZone, true) . '|' . 
+                           $keyPart($destinationZone, true) . '|' . 
+                           $keyPart($network) . '|' . 
+                           $keyPart($service);
                 };
                 
                 // If we have few existing records (< 5000), load all into memory for fast lookup
@@ -389,7 +397,7 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                     $toInsert = [];
                     $toUpdate = [];
                     
-                    foreach ($this->validRows as $row) {
+                foreach ($this->validRows as $row) {
                         $key = $createKey(
                             $row['origin'],
                             $row['destination'],
@@ -414,13 +422,13 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                     foreach ($checkChunks as $checkChunk) {
                         // Build a simple query for this small chunk (max 50 records)
                         // Handle NULL/empty zone values properly in the query
-                        $existingRecords = ShippingCharge::where(function($query) use ($checkChunk, $normalizeKeyValue) {
+                        $existingRecords = ShippingCharge::where(function($query) use ($checkChunk, $normalizeValue) {
                             foreach ($checkChunk as $row) {
-                                $query->orWhere(function($q) use ($row, $normalizeKeyValue) {
-                                    $q->where('origin', $normalizeKeyValue($row['origin']))
-                                      ->where('destination', $normalizeKeyValue($row['destination']))
-                                      ->where(function($zoneQ) use ($row, $normalizeKeyValue) {
-                                          $originZone = $normalizeKeyValue($row['origin_zone']);
+                                $query->orWhere(function($q) use ($row, $normalizeValue) {
+                                    $q->where('origin', $normalizeValue($row['origin']))
+                                      ->where('destination', $normalizeValue($row['destination']))
+                                      ->where(function($zoneQ) use ($row, $normalizeValue) {
+                                          $originZone = $normalizeValue($row['origin_zone'], true);
                                           if ($originZone === '') {
                                               $zoneQ->where(function($z) {
                                                   $z->whereNull('origin_zone')->orWhere('origin_zone', '');
@@ -429,8 +437,8 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                                               $zoneQ->where('origin_zone', $originZone);
                                           }
                                       })
-                                      ->where(function($zoneQ) use ($row, $normalizeKeyValue) {
-                                          $destZone = $normalizeKeyValue($row['destination_zone']);
+                                      ->where(function($zoneQ) use ($row, $normalizeValue) {
+                                          $destZone = $normalizeValue($row['destination_zone'], true);
                                           if ($destZone === '') {
                                               $zoneQ->where(function($z) {
                                                   $z->whereNull('destination_zone')->orWhere('destination_zone', '');
@@ -439,8 +447,8 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                                               $zoneQ->where('destination_zone', $destZone);
                                           }
                                       })
-                                      ->where('network', $normalizeKeyValue($row['network']))
-                                      ->where('service', $normalizeKeyValue($row['service']));
+                                      ->where('network', $normalizeValue($row['network']))
+                                      ->where('service', $normalizeValue($row['service']));
                                 });
                             }
                         })->get()->keyBy(function($item) use ($createKey) {
@@ -486,8 +494,8 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                                 'max_weight' => $item['data']['max_weight'],
                                 'rate' => $item['data']['rate'],
                                 'remark' => $item['data']['remark'],
-                                'origin_zone' => $normalizeKeyValue($item['data']['origin_zone']),
-                                'destination_zone' => $normalizeKeyValue($item['data']['destination_zone']),
+                                'origin_zone' => $normalizeValue($item['data']['origin_zone'], true),
+                                'destination_zone' => $normalizeValue($item['data']['destination_zone'], true),
                                 'updated_at' => now(),
                             ]);
                             $this->importedCount++;
@@ -503,15 +511,15 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                         $now = now();
                         foreach ($chunk as $row) {
                             $insertData[] = [
-                                'origin' => $normalizeKeyValue($row['origin']),
-                                'origin_zone' => $normalizeKeyValue($row['origin_zone']),
-                                'destination' => $normalizeKeyValue($row['destination']),
-                                'destination_zone' => $normalizeKeyValue($row['destination_zone']),
+                                'origin' => $normalizeValue($row['origin']),
+                                'origin_zone' => $normalizeValue($row['origin_zone'], true),
+                                'destination' => $normalizeValue($row['destination']),
+                                'destination_zone' => $normalizeValue($row['destination_zone'], true),
                                 'shipment_type' => $row['shipment_type'],
                                 'min_weight' => $row['min_weight'],
                                 'max_weight' => $row['max_weight'],
-                                'network' => $normalizeKeyValue($row['network']),
-                                'service' => $normalizeKeyValue($row['service']),
+                                'network' => $normalizeValue($row['network']),
+                                'service' => $normalizeValue($row['service']),
                                 'rate' => $row['rate'],
                                 'remark' => $row['remark'],
                                 'created_at' => $now,
@@ -554,5 +562,52 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
         if (is_numeric($value)) return (float)$value;
         $cleaned = preg_replace('/[^0-9.]/', '', (string)$value);
         return $cleaned !== '' ? (float)$cleaned : 0;
+    }
+
+    /**
+     * Normalize generic string values (trim + handle nulls)
+     */
+    private function normalizeStringValue($value)
+    {
+        if ($value === null) {
+            return '';
+        }
+        $value = trim((string)$value);
+        return $value;
+    }
+
+    /**
+     * Normalize zone values so that placeholders like "No Zone" map to empty strings.
+     */
+    private function normalizeZoneValue($value)
+    {
+        $normalized = $this->normalizeStringValue($value);
+        if ($normalized === '') {
+            return '';
+        }
+        
+        $valueLower = mb_strtolower($normalized);
+        $placeholders = [
+            'no zone',
+            'no-zone',
+            'nozone',
+            'no pincode',
+            'no-pincode',
+            'nopincode',
+            'no pin',
+            'no-pin',
+            'nopin',
+            'n/a',
+            'not applicable',
+            'not-applicable',
+            'not available',
+            'notavailable',
+        ];
+        
+        if (in_array($valueLower, $placeholders, true)) {
+            return '';
+        }
+        
+        return $normalized;
     }
 }
