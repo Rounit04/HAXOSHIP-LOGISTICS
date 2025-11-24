@@ -8,6 +8,10 @@
             $siteName = $frontendSettings->site_name ?? config('app.name');
         @endphp
         <title>@yield('title', $siteName)</title>
+        @if($frontendSettings->favicon && Storage::disk('public')->exists($frontendSettings->favicon))
+            <link rel="icon" type="image/x-icon" href="{{ Storage::url($frontendSettings->favicon) }}">
+            <link rel="shortcut icon" type="image/x-icon" href="{{ Storage::url($frontendSettings->favicon) }}">
+        @endif
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
         @php
             $manifestPath = public_path('build/manifest.json');

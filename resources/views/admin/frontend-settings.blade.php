@@ -283,6 +283,41 @@
 
         <hr class="my-4 border-gray-200">
 
+        <!-- Favicon Field -->
+        <div class="form-group">
+            <label class="form-label">Favicon</label>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
+                <div class="file-input-wrapper">
+                    <label for="favicon" class="file-input-label">
+                        <input type="file" name="favicon" id="favicon" accept="image/*,.ico" class="file-input" onchange="previewImage(this, 'favicon-preview')">
+                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        <span class="text-xs text-gray-700">Choose Favicon</span>
+                    </label>
+                </div>
+                <div class="flex items-center justify-center">
+                    @if($settings->favicon && Storage::disk('public')->exists($settings->favicon))
+                        <img src="{{ Storage::url($settings->favicon) }}" alt="Current Favicon" id="favicon-preview" class="image-preview" style="max-width: 64px; max-height: 64px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div id="favicon-preview-placeholder" class="image-preview-placeholder" style="display: none; width: 64px; height: 64px;">
+                            <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                            </svg>
+                        </div>
+                    @else
+                        <div id="favicon-preview" class="image-preview-placeholder" style="width: 64px; height: 64px;">
+                            <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                            </svg>
+                        </div>
+                    @endif
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">ICO, PNG, JPG, SVG up to 1MB (Recommended: 32x32 or 64x64 pixels)</p>
+        </div>
+
+        <hr class="my-4 border-gray-200">
+
         <!-- Banner Field -->
         <div class="form-group">
             <label class="form-label">Hero Banner (Landing Page)</label>

@@ -16,6 +16,7 @@ class FrontendSetting extends Model
         'site_email',
         'site_description',
         'logo',
+        'favicon',
         'banner',
         'primary_color',
         'secondary_color',
@@ -94,7 +95,7 @@ class FrontendSetting extends Model
     {
         $disk = Storage::disk('public');
 
-        foreach (['logo', 'banner', 'footer_logo'] as $attribute) {
+        foreach (['logo', 'favicon', 'banner', 'footer_logo'] as $attribute) {
             $relativePath = $this->{$attribute};
 
             if (empty($relativePath) || !$disk->exists($relativePath)) {

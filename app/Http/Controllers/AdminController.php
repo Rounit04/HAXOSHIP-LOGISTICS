@@ -363,6 +363,7 @@ class AdminController extends Controller
     {
         $request->validate([
             'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'favicon' => 'nullable|image|mimes:ico,png,jpg,gif,svg|max:1024',
             'banner' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:5120',
             'primary_color' => 'required|string|regex:/^#[0-9A-Fa-f]{6}$/',
             'secondary_color' => 'required|string|regex:/^#[0-9A-Fa-f]{6}$/',
@@ -398,6 +399,20 @@ class AdminController extends Controller
             $logoPath = $request->file('logo')->store('frontend', 'public');
             $settings->logo = $logoPath;
             $this->mirrorFileToPublicStorage($logoPath);
+        }
+
+        // Handle favicon upload
+        if ($request->hasFile('favicon')) {
+            // Delete old favicon if exists
+            if ($settings->favicon) {
+                if (Storage::disk('public')->exists($settings->favicon)) {
+                    Storage::disk('public')->delete($settings->favicon);
+                }
+                $this->deleteMirroredPublicFile($settings->favicon);
+            }
+            $faviconPath = $request->file('favicon')->store('frontend', 'public');
+            $settings->favicon = $faviconPath;
+            $this->mirrorFileToPublicStorage($faviconPath);
         }
 
         // Handle banner upload
