@@ -3,7 +3,11 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>@yield('title', 'Dashboard') - {{ config('app.name', 'Haxo Shipping') }}</title>
+        @php
+            $frontendSettings = \App\Models\FrontendSetting::getSettings();
+            $siteName = $frontendSettings->site_name ?? config('app.name', 'Haxo Shipping');
+        @endphp
+        <title>@yield('title', 'Dashboard') - {{ $siteName }}</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
         @php
             $manifestPath = public_path('build/manifest.json');
@@ -606,8 +610,7 @@
                             </div>
                             <div>
                                 <div class="flex items-center gap-1 sm:gap-1.5">
-                                    <span class="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 tracking-tight">Haxo</span>
-                                    <span class="text-lg sm:text-xl lg:text-2xl font-bold tracking-tight" style="color: var(--admin-orange);">Shipping</span>
+                                    <span class="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 tracking-tight">{{ $siteName }}</span>
                                 </div>
                                 <p class="text-xs text-gray-500 font-medium mt-0.5 hidden sm:block">Admin Panel</p>
                             </div>

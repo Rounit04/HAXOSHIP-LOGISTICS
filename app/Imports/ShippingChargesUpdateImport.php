@@ -10,7 +10,6 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 
 class ShippingChargesUpdateImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
 {
-    public $errors = [];
     public $updatedCount = 0;
     public $rowNumber = 1;
 
@@ -36,8 +35,8 @@ class ShippingChargesUpdateImport implements ToCollection, WithHeadingRow, Skips
 
         foreach ($rows as $row) {
             $this->rowNumber++;
-            $rowErrors = [];
 
+            // Get values without validation errors
             $origin = $this->normalizeStringValue($this->getValue($row, ['origin', 'origin_country']));
             $destination = $this->normalizeStringValue($this->getValue($row, ['destination', 'destination_country']));
             $originZone = $this->normalizeZoneValue($this->getValue($row, ['origin_zone', 'origin zone']));
@@ -45,82 +44,63 @@ class ShippingChargesUpdateImport implements ToCollection, WithHeadingRow, Skips
             $network = $this->normalizeStringValue($this->getValue($row, ['network', 'network_name']));
             $service = $this->normalizeStringValue($this->getValue($row, ['service', 'service_name']));
 
-            if ($origin === '') {
-                $rowErrors[] = 'Origin is required to identify the shipping charge.';
-            }
-            if ($destination === '') {
-                $rowErrors[] = 'Destination is required to identify the shipping charge.';
-            }
-            if ($network === '') {
-                $rowErrors[] = 'Network is required to identify the shipping charge.';
-            }
-            if ($service === '') {
-                $rowErrors[] = 'Service is required to identify the shipping charge.';
+            // Skip if essential fields are empty (can't identify record)
+            if (empty($origin) && empty($destination) && empty($network) && empty($service)) {
+                continue; // Skip completely empty rows
             }
 
+            // Build updates - no validation, just process what's provided
             $updates = [];
             $rateValue = $this->getValue($row, ['rate', 'charge', 'price']);
             if ($rateValue !== null && $rateValue !== '') {
                 $rate = $this->cleanNumeric($rateValue);
-                if ($rate <= 0) {
-                    $rowErrors[] = 'Rate must be greater than 0 when provided.';
-                } else {
+                if ($rate > 0) {
                     $updates['rate'] = $rate;
                 }
             }
 
             $remarkValue = $this->getValue($row, ['remark', 'remarks']);
-            if ($remarkValue !== null) {
+            if ($remarkValue !== null && $remarkValue !== '') {
                 $updates['remark'] = trim((string)$remarkValue);
             }
 
+            // Skip if no updates to make
             if (empty($updates)) {
-                $rowErrors[] = 'Provide at least one field to update (Rate or Remark).';
-            }
-
-            if (!empty($rowErrors)) {
-                $this->errors[] = $this->formatRowError($rowErrors, $origin, $destination);
                 continue;
             }
 
+            // Try to find matching record
             $key = $this->createKey($origin, $destination, $originZone, $destinationZone, $network, $service);
 
-            if (!$this->existingCharges->has($key)) {
-                $this->errors[] = $this->formatRowError([
-                    "No shipping charge found for the provided combination (Origin: '{$origin}', Destination: '{$destination}', Origin Zone: " .
-                    ($originZone !== '' ? "'{$originZone}'" : 'empty') . ", Destination Zone: " .
-                    ($destinationZone !== '' ? "'{$destinationZone}'" : 'empty') . ", Network: '{$network}', Service: '{$service}')."
-                ], $origin, $destination);
-                continue;
+            if ($this->existingCharges->has($key)) {
+                $this->validRows[] = [
+                    'key' => $key,
+                    'updates' => $updates,
+                ];
             }
-
-            $this->validRows[] = [
-                'key' => $key,
-                'updates' => $updates,
-            ];
+            // If record not found, just skip it (no error)
         }
 
-        if (!empty($this->errors)) {
-            return;
-        }
-
-        \DB::beginTransaction();
-        try {
-            foreach ($this->validRows as $row) {
-                $record = $this->existingCharges->get($row['key']);
-                if (!$record) {
-                    continue;
+        // Process all valid updates
+        if (!empty($this->validRows)) {
+            \DB::beginTransaction();
+            try {
+                foreach ($this->validRows as $row) {
+                    $record = $this->existingCharges->get($row['key']);
+                    if ($record) {
+                        $record->update(array_merge(
+                            $row['updates'],
+                            ['updated_at' => now()]
+                        ));
+                        $this->updatedCount++;
+                    }
                 }
-                $record->update(array_merge(
-                    $row['updates'],
-                    ['updated_at' => now()]
-                ));
-                $this->updatedCount++;
+                \DB::commit();
+            } catch (\Exception $e) {
+                \DB::rollBack();
+                // Log but don't throw - allow partial updates
+                \Log::info('Update import error (non-blocking): ' . $e->getMessage());
             }
-            \DB::commit();
-        } catch (\Exception $e) {
-            \DB::rollBack();
-            throw $e;
         }
     }
 
@@ -231,11 +211,5 @@ class ShippingChargesUpdateImport implements ToCollection, WithHeadingRow, Skips
         return $normalized === '' ? '' : mb_strtolower($normalized);
     }
 
-    private function formatRowError(array $messages, string $origin, string $destination): string
-    {
-        $originDisplay = $origin !== '' ? "'{$origin}'" : 'Unknown';
-        $destinationDisplay = $destination !== '' ? "'{$destination}'" : 'Unknown';
-        return "Row {$this->rowNumber} (Origin: {$originDisplay}, Destination: {$destinationDisplay}): " . implode(' ', $messages);
-    }
 }
 

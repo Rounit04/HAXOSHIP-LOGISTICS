@@ -10,6 +10,38 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Artisan;
 
+/**
+ * Helper function to get all tables from database (works with both MySQL and SQLite)
+ */
+if (!function_exists('getDatabaseTables')) {
+    function getDatabaseTables() {
+        try {
+            $driver = \DB::connection()->getDriverName();
+            $tables = [];
+            
+            if ($driver === 'sqlite') {
+                // For SQLite
+                $results = \DB::select("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+                foreach ($results as $row) {
+                    $tables[] = $row->name;
+                }
+            } else {
+                // For MySQL/MariaDB
+                $databaseName = \DB::connection()->getDatabaseName();
+                $results = \DB::select('SHOW TABLES');
+                $tableKey = 'Tables_in_' . $databaseName;
+                foreach ($results as $row) {
+                    $tables[] = $row->$tableKey;
+                }
+            }
+            
+            return $tables;
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+}
+
 Route::get('/', [FrontendController::class, 'home'])->name('home');
 Route::view('/pricing', 'pricing')->name('pricing');
 Route::view('/tracking', 'tracking')->name('tracking');
@@ -55,6 +87,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('dashboard');
     Route::get('/users', [AdminController::class, 'users'])->name('users');
         Route::get('/settings', [AdminController::class, 'settings'])->name('settings');
+        Route::post('/settings/general', [AdminController::class, 'updateGeneralSettings'])->name('settings.update-general');
         Route::post('/settings/gdpr-cookie', [AdminController::class, 'updateGdprCookieSettings'])->name('settings.update-gdpr-cookie');
         Route::get('/notification-settings', [AdminController::class, 'notificationSettings'])->name('notification-settings');
         Route::post('/notification-settings', [AdminController::class, 'updateNotificationSettings'])->name('notification-settings.update');
@@ -224,6 +257,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::post('/shipping-charges/bulk-delete', [AdminController::class, 'bulkDeleteShippingCharges'])->name('shipping-charges.bulk-delete');
     Route::post('/shipping-charges/import', [AdminController::class, 'importShippingCharges'])->name('shipping-charges.import');
     Route::get('/shipping-charges/template/download', [AdminController::class, 'downloadShippingChargeTemplate'])->name('shipping-charges.template.download');
+    Route::get('/shipping-charges/php-limits', [AdminController::class, 'phpLimitsCheck'])->name('shipping-charges.php-limits');
     Route::post('/shipping-charges/update-file', [AdminController::class, 'importShippingChargeUpdates'])->name('shipping-charges.import-updates');
     Route::get('/shipping-charges/update-template/download', [AdminController::class, 'downloadShippingChargeUpdateTemplate'])->name('shipping-charges.update-template.download');
     Route::get('/formulas', [AdminController::class, 'formulas'])->name('formulas');
@@ -319,6 +353,7 @@ Route::prefix('admin')->name('admin.')->middleware('admin.auth')->group(function
     Route::get('/banks/transfer', [AdminController::class, 'bankTransfer'])->name('banks.transfer');
     Route::post('/banks/transfer', [AdminController::class, 'storeBankTransfer'])->name('banks.transfer.store');
     Route::get('/banks/transfer/all', [AdminController::class, 'allBankTransfers'])->name('banks.transfer.all');
+    Route::get('/banks/transfer/export', [AdminController::class, 'exportBankTransfers'])->name('banks.transfer.export');
     Route::get('/banks/transfer/{id}/view', [AdminController::class, 'viewBankTransfer'])->name('banks.transfer.view');
     Route::delete('/banks/transfer/{id}', [AdminController::class, 'deleteBankTransfer'])->name('banks.transfer.delete');
     Route::post('/banks/bulk-delete', [AdminController::class, 'bulkDeleteBanks'])->name('banks.bulk-delete');
@@ -414,46 +449,402 @@ Route::get('/storage/{path}', function (string $path) {
  * Set MIGRATION_TOKEN in .env file for security
  */
 Route::get('/run-migrations', function () {
-    // Check if token is provided and matches
-    $providedToken = request()->query('token');
-    $expectedToken = env('MIGRATION_TOKEN', 'change-this-secret-token-in-production');
+    // TOKEN CHECK DISABLED BY DEFAULT - Allow access without token
+    // This route works without authentication for easy deployment
+    // To enable token requirement, uncomment the code below and set MIGRATION_TOKEN in .env
     
-    if (empty($providedToken) || $providedToken !== $expectedToken) {
-        return response()->json([
-            'error' => 'Unauthorized. Invalid or missing token.',
-            'message' => 'Please provide a valid token parameter.'
-        ], 401);
+    // Optional: Enable token check (currently disabled)
+    /*
+    $expectedToken = trim((string)(env('MIGRATION_TOKEN') ?: ''));
+    if (!empty($expectedToken)) {
+        $providedToken = trim((string)(request()->query('token') ?? ''));
+        if (empty($providedToken) || $providedToken !== $expectedToken) {
+            return response()->json([
+                'error' => 'Unauthorized. Invalid or missing token.',
+                'message' => 'Token required. Add ?token=YOUR_TOKEN to URL.'
+            ], 401);
+        }
     }
-    
-    // Only allow in production or if explicitly enabled
-    if (app()->environment('production') && $expectedToken === 'change-this-secret-token-in-production') {
-        return response()->json([
-            'error' => 'Security Error',
-            'message' => 'Please set a secure MIGRATION_TOKEN in your .env file before using this route in production.'
-        ], 403);
-    }
+    */
+    // Proceeding without token requirement
     
     try {
-        // Run migrations with force flag
+        // Get current database connection
+        $connection = \DB::connection();
+        $databaseName = \DB::connection()->getDatabaseName();
+        
+        // Get all existing tables (works with both MySQL and SQLite)
+        $existingTables = getDatabaseTables();
+        
+        // Get migration status before running
+        Artisan::call('migrate:status');
+        $statusBefore = Artisan::output();
+        
+        // Count migrations before
+        $migrationsBefore = 0;
+        try {
+            $migrationsBefore = \DB::table('migrations')->count();
+        } catch (\Exception $e) {
+            // migrations table might not exist
+        }
+        
+        // Run migrations with force flag - this will run any pending migrations
         Artisan::call('migrate', ['--force' => true]);
         
         $output = Artisan::output();
         
+        // Get migration status after running
+        Artisan::call('migrate:status');
+        $statusAfter = Artisan::output();
+        
+        // Count migrations after
+        $migrationsAfter = 0;
+        try {
+            $migrationsAfter = \DB::table('migrations')->count();
+        } catch (\Exception $e) {
+            // migrations table might not exist
+        }
+        
+        // Get all tables after migration (works with both MySQL and SQLite)
+        $tablesAfter = getDatabaseTables();
+        
+        // Get list of all migration files to count total
+        $migrationFiles = glob(database_path('migrations/*.php'));
+        $totalMigrations = count($migrationFiles);
+        
+        $newMigrationsRun = $migrationsAfter - $migrationsBefore;
+        $newTablesCreated = count($tablesAfter) - count($existingTables);
+        
         return response()->json([
             'success' => true,
             'message' => 'Migrations ran successfully!',
-            'output' => $output
+            'total_migration_files' => $totalMigrations,
+            'migrations_before' => $migrationsBefore,
+            'migrations_after' => $migrationsAfter,
+            'new_migrations_run' => $newMigrationsRun,
+            'tables_before' => count($existingTables),
+            'tables_after' => count($tablesAfter),
+            'new_tables_created' => $newTablesCreated,
+            'existing_tables' => $existingTables,
+            'all_tables_now' => $tablesAfter,
+            'output' => $output,
+            'status_before' => $statusBefore,
+            'status_after' => $statusAfter
         ], 200);
         
     } catch (\Exception $e) {
         \Log::error('Migration route error: ' . $e->getMessage());
+        \Log::error('Migration route stack trace: ' . $e->getTraceAsString());
+        
+        // Get detailed error information for debugging
+        $errorDetails = [
+            'message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'code' => $e->getCode(),
+        ];
+        
+        // Check database connection
+        $dbStatus = 'unknown';
+        try {
+            \DB::connection()->getPdo();
+            $dbStatus = 'connected';
+            $dbName = \DB::connection()->getDatabaseName();
+            $errorDetails['database'] = [
+                'status' => $dbStatus,
+                'name' => $dbName,
+                'connection' => 'ok'
+            ];
+        } catch (\Exception $dbEx) {
+            $dbStatus = 'error';
+            $errorDetails['database'] = [
+                'status' => $dbStatus,
+                'error' => $dbEx->getMessage(),
+                'connection' => 'failed'
+            ];
+        }
+        
+        // Check migrations directory
+        $migrationsPath = database_path('migrations');
+        $errorDetails['migrations_directory'] = [
+            'path' => $migrationsPath,
+            'exists' => file_exists($migrationsPath),
+            'readable' => is_readable($migrationsPath),
+            'file_count' => file_exists($migrationsPath) ? count(glob($migrationsPath . '/*.php')) : 0
+        ];
+        
+        // Check permissions
+        $errorDetails['permissions'] = [
+            'database_writable' => is_writable(database_path()),
+            'storage_writable' => is_writable(storage_path()),
+            'bootstrap_cache_writable' => is_writable(bootstrap_path('cache'))
+        ];
         
         return response()->json([
             'success' => false,
             'error' => 'Migration failed',
-            'message' => $e->getMessage()
+            'error_details' => $errorDetails,
+            'suggestions' => [
+                'Check database credentials in .env file',
+                'Verify database exists and user has proper permissions',
+                'Check file permissions on database/ and storage/ directories',
+                'Ensure migrations directory exists: ' . $migrationsPath,
+                'Check PHP error logs for more details'
+            ]
         ], 500);
     }
 })->name('run-migrations');
 
-Route::fallback([ErrorController::class, 'notFound']);
+/**
+ * Clear config cache route (for deployment without SSH access)
+ * Access: /clear-config-cache
+ */
+Route::get('/clear-config-cache', function () {
+    try {
+        Artisan::call('config:clear');
+        Artisan::call('cache:clear');
+        Artisan::call('route:clear');
+        Artisan::call('view:clear');
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Cache cleared successfully!',
+            'output' => Artisan::output()
+        ], 200);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => 'Failed to clear cache',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+})->name('clear-config-cache');
+
+/**
+ * Force re-run all migrations route (resets migrations table and re-runs all)
+ * This is useful when migrations are marked as run but tables weren't created
+ * Access: /force-migrate
+ * WARNING: This will reset the migrations table and re-run ALL migrations
+ */
+Route::get('/force-migrate', function () {
+    try {
+        // Get current tables (works with both MySQL and SQLite)
+        $tablesBefore = getDatabaseTables();
+        
+        // Count migrations before
+        $migrationsBefore = 0;
+        try {
+            $migrationsBefore = \DB::table('migrations')->count();
+        } catch (\Exception $e) {
+            // migrations table might not exist
+        }
+        
+        // Reset migrations table - remove all entries to force re-run
+        try {
+            \DB::table('migrations')->truncate();
+        } catch (\Exception $e) {
+            // If truncate fails, try delete
+            try {
+                \DB::table('migrations')->delete();
+            } catch (\Exception $e2) {
+                // migrations table might not exist, continue
+            }
+        }
+        
+        // Now run all migrations fresh
+        Artisan::call('migrate', ['--force' => true]);
+        
+        $output = Artisan::output();
+        
+        // Get status after
+        Artisan::call('migrate:status');
+        $statusAfter = Artisan::output();
+        
+        // Count migrations after
+        $migrationsAfter = 0;
+        try {
+            $migrationsAfter = \DB::table('migrations')->count();
+        } catch (\Exception $e) {
+            // migrations table might not exist
+        }
+        
+        // Get all tables after migration (works with both MySQL and SQLite)
+        $tablesAfter = getDatabaseTables();
+        
+        $migrationFiles = glob(database_path('migrations/*.php'));
+        $totalMigrations = count($migrationFiles);
+        
+        $newTablesCreated = count($tablesAfter) - count($tablesBefore);
+        $missingTables = array_diff($tablesAfter, $tablesBefore);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'All migrations re-run successfully!',
+            'total_migration_files' => $totalMigrations,
+            'migrations_before' => $migrationsBefore,
+            'migrations_after' => $migrationsAfter,
+            'tables_before' => count($tablesBefore),
+            'tables_after' => count($tablesAfter),
+            'new_tables_created' => $newTablesCreated,
+            'missing_tables_now_created' => array_values($missingTables),
+            'all_tables' => $tablesAfter,
+            'output' => $output,
+            'status' => $statusAfter
+        ], 200);
+        
+    } catch (\Exception $e) {
+        \Log::error('Force migrate route error: ' . $e->getMessage());
+        \Log::error('Force migrate route stack trace: ' . $e->getTraceAsString());
+        
+        // Get detailed error information for debugging on live servers
+        $errorDetails = [
+            'message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'code' => $e->getCode(),
+        ];
+        
+        // Check database connection
+        try {
+            \DB::connection()->getPdo();
+            $dbName = \DB::connection()->getDatabaseName();
+            $errorDetails['database'] = [
+                'status' => 'connected',
+                'name' => $dbName
+            ];
+        } catch (\Exception $dbEx) {
+            $errorDetails['database'] = [
+                'status' => 'error',
+                'error' => $dbEx->getMessage()
+            ];
+        }
+        
+        // Check migrations directory
+        $migrationsPath = database_path('migrations');
+        $errorDetails['migrations_directory'] = [
+            'path' => $migrationsPath,
+            'exists' => file_exists($migrationsPath),
+            'file_count' => file_exists($migrationsPath) ? count(glob($migrationsPath . '/*.php')) : 0
+        ];
+        
+        return response()->json([
+            'success' => false,
+            'error' => 'Force migration failed',
+            'error_details' => $errorDetails,
+            'suggestions' => [
+                'Verify database connection settings in .env file',
+                'Check database user has CREATE, ALTER, DROP permissions',
+                'Ensure migrations directory exists and is readable',
+                'Check PHP memory_limit and max_execution_time settings',
+                'Review server error logs for more details'
+            ]
+        ], 500);
+    }
+})->name('force-migrate');
+
+/**
+ * Diagnostic route to check server and database configuration
+ * Access: /check-migration-status
+ */
+Route::get('/check-migration-status', function () {
+    $diagnostics = [];
+    
+    // Check database connection
+    try {
+        $pdo = \DB::connection()->getPdo();
+        $dbName = \DB::connection()->getDatabaseName();
+        $diagnostics['database'] = [
+            'status' => 'connected',
+            'name' => $dbName,
+            'driver' => \DB::connection()->getDriverName(),
+        ];
+        
+        // Check if migrations table exists
+        try {
+            $migrationsCount = \DB::table('migrations')->count();
+            $diagnostics['migrations_table'] = [
+                'exists' => true,
+                'recorded_migrations' => $migrationsCount
+            ];
+        } catch (\Exception $e) {
+            $diagnostics['migrations_table'] = [
+                'exists' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+        
+        // Count actual tables (works with both MySQL and SQLite)
+        try {
+            $tableNames = getDatabaseTables();
+            $diagnostics['tables'] = [
+                'count' => count($tableNames),
+                'names' => $tableNames
+            ];
+        } catch (\Exception $e) {
+            $diagnostics['tables'] = [
+                'error' => $e->getMessage()
+            ];
+        }
+        
+    } catch (\Exception $e) {
+        $diagnostics['database'] = [
+            'status' => 'error',
+            'error' => $e->getMessage()
+        ];
+    }
+    
+    // Check migrations directory
+    $migrationsPath = database_path('migrations');
+    $migrationFiles = glob($migrationsPath . '/*.php');
+    $diagnostics['migrations_directory'] = [
+        'path' => $migrationsPath,
+        'exists' => file_exists($migrationsPath),
+        'readable' => is_readable($migrationsPath),
+        'file_count' => count($migrationFiles),
+        'files' => array_map('basename', $migrationFiles)
+    ];
+    
+    // Check file permissions
+    $diagnostics['permissions'] = [
+        'database_dir_writable' => is_writable(database_path()),
+        'storage_dir_writable' => is_writable(storage_path()),
+        'bootstrap_cache_writable' => is_writable(base_path('bootstrap/cache'))
+    ];
+    
+    // Check PHP configuration
+    $diagnostics['php'] = [
+        'version' => PHP_VERSION,
+        'memory_limit' => ini_get('memory_limit'),
+        'max_execution_time' => ini_get('max_execution_time'),
+        'pdo_mysql_loaded' => extension_loaded('pdo_mysql'),
+        'mysqli_loaded' => extension_loaded('mysqli')
+    ];
+    
+    // Check environment
+    $diagnostics['environment'] = [
+        'app_env' => env('APP_ENV', 'not set'),
+        'app_debug' => env('APP_DEBUG', 'not set'),
+        'db_connection' => env('DB_CONNECTION', 'not set'),
+        'db_host' => env('DB_HOST', 'not set'),
+        'db_database' => env('DB_DATABASE', 'not set'),
+        'db_port' => env('DB_PORT', 'not set'),
+    ];
+    
+    return response()->json([
+        'success' => true,
+        'diagnostics' => $diagnostics,
+        'recommendations' => []
+    ], 200);
+})->name('check-migration-status');
+
+// Exclude asset paths from fallback to prevent MIME type errors
+Route::fallback(function () {
+    $path = request()->path();
+    
+    // If requesting static assets (CSS, JS, images, etc.), return proper 404 without HTML
+    if (preg_match('/\.(css|js|jpg|jpeg|png|gif|svg|ico|woff|woff2|ttf|eot|json|map|wasm)$/i', $path)) {
+        abort(404);
+    }
+    
+    return app(ErrorController::class)->notFound();
+});

@@ -68,6 +68,14 @@
             background: #dbeafe;
             color: #1e40af;
         }
+        .text-green {
+            color: #059669;
+            font-weight: 600;
+        }
+        .text-red {
+            color: #dc2626;
+            font-weight: 600;
+        }
     </style>
 
     <!-- Page Header -->
@@ -80,8 +88,8 @@
                     </svg>
                 </div>
                 <div>
-                    <h1 class="text-2xl font-bold text-gray-900 mb-0.5">All Bank Transfers</h1>
-                    <p class="text-xs text-gray-600">View all money transfers between bank accounts</p>
+                    <h1 class="text-2xl font-bold text-gray-900 mb-0.5">Bank Transfer Report</h1>
+                    <p class="text-xs text-gray-600">View all money transfers with credit, debit, and balance</p>
                 </div>
             </div>
             <a href="{{ route('admin.banks.transfer') }}" class="admin-btn-primary px-4 py-2 text-sm">
@@ -101,26 +109,68 @@
             </svg>
             Search & Filter
         </h2>
-        <form method="GET" action="{{ route('admin.banks.transfer.all') }}" class="flex gap-3">
-            <input 
-                type="text" 
-                name="search" 
-                value="{{ $searchParams['search'] ?? '' }}" 
-                placeholder="Search by bank name, account number, or transaction number..." 
-                class="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
-            >
-            <button type="submit" class="admin-btn-primary px-6 py-2">
-                <svg class="w-4 h-4 text-white inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                </svg>
-                Search
-            </button>
-            @if($searchParams['search'] ?? '')
-                <a href="{{ route('admin.banks.transfer.all') }}" class="px-6 py-2 rounded-lg border-2 border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition">
-                    Clear
-                </a>
-            @endif
+        <form method="GET" action="{{ route('admin.banks.transfer.all') }}" class="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">Search</label>
+                <input 
+                    type="text" 
+                    name="search" 
+                    value="{{ $searchParams['search'] ?? '' }}" 
+                    placeholder="Bank name, transaction no..." 
+                    class="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
+                >
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">Date From</label>
+                <input 
+                    type="date" 
+                    name="date_from" 
+                    value="{{ $searchParams['date_from'] ?? '' }}" 
+                    class="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
+                >
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">Date To</label>
+                <input 
+                    type="date" 
+                    name="date_to" 
+                    value="{{ $searchParams['date_to'] ?? '' }}" 
+                    class="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
+                >
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-700 mb-2">Or Select Month</label>
+                <input 
+                    type="month" 
+                    name="month" 
+                    value="{{ $searchParams['month'] ?? '' }}" 
+                    class="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
+                >
+            </div>
+            <div class="flex items-end gap-2">
+                <button type="submit" class="admin-btn-primary px-6 py-2 flex-1">
+                    <svg class="w-4 h-4 text-white inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    Search
+                </button>
+                @if($searchParams['search'] ?? '' || $searchParams['date_from'] ?? '' || $searchParams['date_to'] ?? '' || $searchParams['month'] ?? '')
+                    <a href="{{ route('admin.banks.transfer.all') }}" class="px-6 py-2 rounded-lg border-2 border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition">
+                        Clear
+                    </a>
+                @endif
+            </div>
         </form>
+        
+        <!-- Export Button -->
+        <div class="mt-4 flex justify-end">
+            <a href="{{ route('admin.banks.transfer.export', $searchParams) }}" class="admin-btn-secondary px-6 py-2 text-sm">
+                <svg class="w-4 h-4 text-white inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                Export to Excel
+            </a>
+        </div>
     </div>
 
     <!-- Transfers List -->
@@ -128,11 +178,11 @@
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-bold text-gray-900 flex items-center gap-2">
                 <svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
-                Transfers List
+                Transfer Transactions
             </h2>
-            <span class="text-sm text-gray-600 font-semibold">Total: {{ count($transfers) }} Transfer(s)</span>
+            <span class="text-sm text-gray-600 font-semibold">Total: {{ count($transfers) }} Transaction(s)</span>
         </div>
 
         @if(count($transfers) > 0)
@@ -140,53 +190,57 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>Transaction No.</th>
-                            <th>From Bank</th>
-                            <th>To Bank</th>
-                            <th>Amount</th>
                             <th>Date</th>
-                            <th>Actions</th>
+                            <th>Transaction No.</th>
+                            <th>Bank Account</th>
+                            <th>Type</th>
+                            <th>Debit</th>
+                            <th>Credit</th>
+                            <th>Balance</th>
+                            <th>Remark</th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach($transfers as $transfer)
                             <tr>
                                 <td>
-                                    <span class="badge badge-info">{{ $transfer['transaction_no'] ?? 'N/A' }}</span>
-                                </td>
-                                <td>
-                                    <div class="font-semibold text-gray-900">{{ $transfer['from_bank'] ?? 'N/A' }}</div>
-                                </td>
-                                <td>
-                                    <div class="font-semibold text-gray-900">{{ $transfer['to_bank'] ?? 'N/A' }}</div>
-                                </td>
-                                <td>
-                                    <span class="font-bold text-green-600">₹{{ number_format($transfer['amount'] ?? 0, 2) }}</span>
-                                </td>
-                                <td>
                                     <div class="text-sm text-gray-600">
-                                        {{ \Carbon\Carbon::parse($transfer['created_at'] ?? now())->format('d M Y, h:i A') }}
+                                        {{ \Carbon\Carbon::parse($transfer['date'] ?? now())->format('d M Y, h:i A') }}
                                     </div>
                                 </td>
                                 <td>
-                                    <div class="flex items-center gap-2">
-                                        <a href="{{ route('admin.banks.transfer.view', $transfer['debit_id']) }}" class="admin-btn-primary px-3 py-1.5 text-xs">
-                                            <svg class="w-3.5 h-3.5 text-white inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                                            </svg>
-                                            View Details
-                                        </a>
-                                        <form action="{{ route('admin.banks.transfer.delete', $transfer['debit_id']) }}" method="POST" class="inline-block" onsubmit="return confirm('Are you sure you want to delete this transfer? This will cancel the debit and credit transactions.');">
-                                            @csrf
-                                            @method('DELETE')
-                                            <button type="submit" class="px-3 py-1.5 text-xs rounded-lg bg-red-600 text-white hover:bg-red-700 transition flex items-center gap-1">
-                                                <svg class="w-3.5 h-3.5 text-white inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                                                </svg>
-                                                Delete
-                                            </button>
-                                        </form>
+                                    <span class="badge badge-info">{{ $transfer['transaction_no'] ?? 'N/A' }}</span>
+                                </td>
+                                <td>
+                                    <div class="font-semibold text-gray-900">{{ $transfer['bank_account'] ?? 'N/A' }}</div>
+                                </td>
+                                <td>
+                                    @if(($transfer['type'] ?? '') === 'Credit')
+                                        <span class="badge badge-success">Credit</span>
+                                    @else
+                                        <span class="badge badge-danger">Debit</span>
+                                    @endif
+                                </td>
+                                <td>
+                                    @if(($transfer['debit'] ?? 0) > 0)
+                                        <span class="text-red">₹{{ number_format($transfer['debit'], 2) }}</span>
+                                    @else
+                                        <span class="text-gray-400">-</span>
+                                    @endif
+                                </td>
+                                <td>
+                                    @if(($transfer['credit'] ?? 0) > 0)
+                                        <span class="text-green">₹{{ number_format($transfer['credit'], 2) }}</span>
+                                    @else
+                                        <span class="text-gray-400">-</span>
+                                    @endif
+                                </td>
+                                <td>
+                                    <span class="font-bold text-gray-900">₹{{ number_format($transfer['balance'] ?? 0, 2) }}</span>
+                                </td>
+                                <td>
+                                    <div class="text-sm text-gray-600 max-w-xs truncate" title="{{ $transfer['remark'] ?? '' }}">
+                                        {{ $transfer['remark'] ?? '-' }}
                                     </div>
                                 </td>
                             </tr>
@@ -208,4 +262,3 @@
         @endif
     </div>
 @endsection
-

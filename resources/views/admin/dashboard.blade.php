@@ -778,6 +778,7 @@
             
             courierRevenueChart.data.datasets[0].data = newIncomeData;
             courierRevenueChart.update();
+            com_load_typelib
         };
     </script>
 @endsection

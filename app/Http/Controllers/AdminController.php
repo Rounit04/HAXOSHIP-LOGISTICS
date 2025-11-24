@@ -231,7 +231,39 @@ class AdminController extends Controller
     public function settings()
     {
         $notificationSettings = NotificationSetting::getSettings();
-        return view('admin.settings', compact('notificationSettings'));
+        $frontendSettings = FrontendSetting::getSettings();
+        return view('admin.settings', compact('notificationSettings', 'frontendSettings'));
+    }
+
+    public function updateGeneralSettings(Request $request)
+    {
+        $request->validate([
+            'site_name' => 'nullable|string|max:255',
+            'site_email' => 'nullable|email|max:255',
+            'site_description' => 'nullable|string|max:1000',
+        ]);
+
+        $settings = FrontendSetting::getSettings();
+        $settings->site_name = $request->site_name ?? '';
+        $settings->site_email = $request->site_email ?? '';
+        $settings->site_description = $request->site_description ?? '';
+        $settings->save();
+
+        // Update config cache if needed
+        if ($request->site_name) {
+            // Update .env or config cache (optional)
+            \Artisan::call('config:cache');
+        }
+
+        if ($request->ajax() || $request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+            return response()->json([
+                'success' => true,
+                'message' => 'General settings updated successfully! Site name: ' . ($request->site_name ?: config('app.name')),
+                'site_name' => $settings->site_name ?: config('app.name'),
+            ]);
+        }
+
+        return redirect()->route('admin.settings')->with('success', 'General settings updated successfully!');
     }
 
     public function updateGdprCookieSettings(Request $request)
@@ -9990,10 +10022,32 @@ class AdminController extends Controller
             }
         }
 
-        // Sort by date descending
+        // Sort by date ascending for balance calculation
         usort($groupedTransfers, function($a, $b) {
-            return strtotime($b['created_at']) - strtotime($a['created_at']);
+            return strtotime($a['created_at']) - strtotime($b['created_at']);
         });
+
+        // Apply date filters
+        $dateFrom = $request->get('date_from', '');
+        $dateTo = $request->get('date_to', '');
+        $monthFilter = $request->get('month', '');
+        
+        if ($dateFrom || $dateTo) {
+            $groupedTransfers = array_filter($groupedTransfers, function($transfer) use ($dateFrom, $dateTo) {
+                $transferDate = strtotime($transfer['created_at']);
+                $fromDate = $dateFrom ? strtotime($dateFrom) : 0;
+                $toDate = $dateTo ? strtotime($dateTo . ' 23:59:59') : PHP_INT_MAX;
+                return $transferDate >= $fromDate && $transferDate <= $toDate;
+            });
+            $groupedTransfers = array_values($groupedTransfers);
+        } elseif ($monthFilter) {
+            // Filter by month (format: YYYY-MM)
+            $groupedTransfers = array_filter($groupedTransfers, function($transfer) use ($monthFilter) {
+                $transferMonth = date('Y-m', strtotime($transfer['created_at']));
+                return $transferMonth === $monthFilter;
+            });
+            $groupedTransfers = array_values($groupedTransfers);
+        }
 
         // Apply search filter
         if ($request->filled('search')) {
@@ -10006,12 +10060,300 @@ class AdminController extends Controller
             $groupedTransfers = array_values($groupedTransfers);
         }
 
+        // Get all banks to calculate opening balance
+        $allBanks = $this->getBanks();
+        if (!is_array($allBanks)) {
+            $allBanks = [];
+        }
+        
+        // Get all payments to calculate opening balance for each bank
+        $allPaymentsForBalance = $this->getPaymentsIntoBank();
+        if (!is_array($allPaymentsForBalance)) {
+            $allPaymentsForBalance = [];
+        }
+
+        // Calculate opening balance and running balance for each bank
+        $bankBalances = [];
+        foreach ($allBanks as $bank) {
+            $bankAccountIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+            $bankPayments = collect($allPaymentsForBalance)->filter(function($payment) use ($bankAccountIdentifier) {
+                return ($payment['bank_account'] ?? '') === $bankAccountIdentifier;
+            });
+            
+            // Calculate opening balance (before first transfer in filtered date range)
+            $openingBalance = (float)($bank['opening_balance'] ?? 0);
+            if ($dateFrom || $monthFilter) {
+                $filterDate = $dateFrom ?: ($monthFilter . '-01');
+                $earlierPayments = $bankPayments->filter(function($payment) use ($filterDate) {
+                    return strtotime($payment['created_at'] ?? '') < strtotime($filterDate);
+                });
+                
+                foreach ($earlierPayments as $payment) {
+                    if (($payment['type'] ?? '') === 'Credit') {
+                        $openingBalance += (float)($payment['amount'] ?? 0);
+                    } elseif (($payment['type'] ?? '') === 'Debit') {
+                        $openingBalance -= (float)($payment['amount'] ?? 0);
+                    }
+                }
+            }
+            
+            $bankBalances[$bankAccountIdentifier] = $openingBalance;
+        }
+
+        // Transform transfers to transaction report format with credit, debit, and running balance
+        $transactionReport = [];
+        $runningBalances = $bankBalances; // Copy for running balance calculation
+        
+        foreach ($groupedTransfers as $transfer) {
+            $fromBank = $transfer['from_bank'];
+            $toBank = $transfer['to_bank'];
+            $amount = (float)($transfer['amount'] ?? 0);
+            $date = $transfer['created_at'];
+            
+            // Update running balances
+            if (isset($runningBalances[$fromBank])) {
+                $runningBalances[$fromBank] -= $amount; // Debit from source bank
+            }
+            if (isset($runningBalances[$toBank])) {
+                $runningBalances[$toBank] += $amount; // Credit to destination bank
+            }
+            
+            // Add two rows: one for debit (from bank) and one for credit (to bank)
+            $transactionReport[] = [
+                'date' => $date,
+                'transaction_no' => $transfer['transaction_no'],
+                'bank_account' => $fromBank,
+                'type' => 'Debit',
+                'debit' => $amount,
+                'credit' => 0,
+                'balance' => $runningBalances[$fromBank] ?? 0,
+                'remark' => 'Transfer to ' . $toBank . ($transfer['remark'] ? ' - ' . $transfer['remark'] : ''),
+                'related_bank' => $toBank,
+            ];
+            
+            $transactionReport[] = [
+                'date' => $date,
+                'transaction_no' => $transfer['transaction_no'],
+                'bank_account' => $toBank,
+                'type' => 'Credit',
+                'debit' => 0,
+                'credit' => $amount,
+                'balance' => $runningBalances[$toBank] ?? 0,
+                'remark' => 'Transfer from ' . $fromBank . ($transfer['remark'] ? ' - ' . $transfer['remark'] : ''),
+                'related_bank' => $fromBank,
+            ];
+        }
+
+        // Sort by date descending for display
+        usort($transactionReport, function($a, $b) {
+            return strtotime($b['date']) - strtotime($a['date']);
+        });
+
         return view('admin.banks.transfer-all', [
-            'transfers' => $groupedTransfers,
+            'transfers' => $transactionReport,
             'searchParams' => [
                 'search' => $request->search ?? '',
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'month' => $monthFilter,
             ],
+            'openingBalances' => $bankBalances,
         ]);
+    }
+
+    public function exportBankTransfers(Request $request)
+    {
+        // Check for XMLWriter extension
+        $check = $this->checkXmlWriterExtension();
+        if ($check) {
+            return $check;
+        }
+
+        try {
+            // Get the same data as allBankTransfers but for export
+            $allPayments = $this->getPaymentsIntoBank();
+            if (!is_array($allPayments)) {
+                $allPayments = [];
+            }
+
+            // Filter only transfer transactions
+            $transfers = collect($allPayments)->filter(function($payment) {
+                $remark = strtolower($payment['remark'] ?? '');
+                return strpos($remark, 'transfer') !== false;
+            })->values()->all();
+
+            // Group transfers by transaction number
+            $groupedTransfers = [];
+            $processedIds = [];
+
+            foreach ($transfers as $transfer) {
+                if (in_array($transfer['id'], $processedIds)) {
+                    continue;
+                }
+
+                $transactionNo = $transfer['transaction_no'] ?? '';
+                $relatedTransfer = collect($transfers)->first(function($t) use ($transactionNo, $transfer) {
+                    return ($t['transaction_no'] ?? '') === $transactionNo 
+                        && $t['id'] != $transfer['id']
+                        && $t['type'] != $transfer['type'];
+                });
+
+                if ($relatedTransfer) {
+                    $groupedTransfers[] = [
+                        'transaction_no' => $transactionNo,
+                        'from_bank' => $transfer['type'] === 'Debit' ? $transfer['bank_account'] : $relatedTransfer['bank_account'],
+                        'to_bank' => $transfer['type'] === 'Credit' ? $transfer['bank_account'] : $relatedTransfer['bank_account'],
+                        'amount' => $transfer['amount'],
+                        'remark' => $transfer['remark'] ?? '',
+                        'created_at' => $transfer['created_at'] ?? now()->toDateTimeString(),
+                    ];
+                    $processedIds[] = $transfer['id'];
+                    $processedIds[] = $relatedTransfer['id'];
+                }
+            }
+
+            // Apply filters (same as allBankTransfers)
+            $dateFrom = $request->get('date_from', '');
+            $dateTo = $request->get('date_to', '');
+            $monthFilter = $request->get('month', '');
+            
+            if ($dateFrom || $dateTo) {
+                $groupedTransfers = array_filter($groupedTransfers, function($transfer) use ($dateFrom, $dateTo) {
+                    $transferDate = strtotime($transfer['created_at']);
+                    $fromDate = $dateFrom ? strtotime($dateFrom) : 0;
+                    $toDate = $dateTo ? strtotime($dateTo . ' 23:59:59') : PHP_INT_MAX;
+                    return $transferDate >= $fromDate && $transferDate <= $toDate;
+                });
+                $groupedTransfers = array_values($groupedTransfers);
+            } elseif ($monthFilter) {
+                $groupedTransfers = array_filter($groupedTransfers, function($transfer) use ($monthFilter) {
+                    $transferMonth = date('Y-m', strtotime($transfer['created_at']));
+                    return $transferMonth === $monthFilter;
+                });
+                $groupedTransfers = array_values($groupedTransfers);
+            }
+
+            // Sort by date ascending
+            usort($groupedTransfers, function($a, $b) {
+                return strtotime($a['created_at']) - strtotime($b['created_at']);
+            });
+
+            // Get all banks and calculate balances
+            $allBanks = $this->getBanks();
+            if (!is_array($allBanks)) {
+                $allBanks = [];
+            }
+            
+            $allPaymentsForBalance = $this->getPaymentsIntoBank();
+            if (!is_array($allPaymentsForBalance)) {
+                $allPaymentsForBalance = [];
+            }
+
+            $bankBalances = [];
+            foreach ($allBanks as $bank) {
+                $bankAccountIdentifier = $bank['bank_name'] . ' - ' . $bank['account_number'];
+                $bankPayments = collect($allPaymentsForBalance)->filter(function($payment) use ($bankAccountIdentifier) {
+                    return ($payment['bank_account'] ?? '') === $bankAccountIdentifier;
+                });
+                
+                $openingBalance = (float)($bank['opening_balance'] ?? 0);
+                if ($dateFrom || $monthFilter) {
+                    $filterDate = $dateFrom ?: ($monthFilter . '-01');
+                    $earlierPayments = $bankPayments->filter(function($payment) use ($filterDate) {
+                        return strtotime($payment['created_at'] ?? '') < strtotime($filterDate);
+                    });
+                    
+                    foreach ($earlierPayments as $payment) {
+                        if (($payment['type'] ?? '') === 'Credit') {
+                            $openingBalance += (float)($payment['amount'] ?? 0);
+                        } elseif (($payment['type'] ?? '') === 'Debit') {
+                            $openingBalance -= (float)($payment['amount'] ?? 0);
+                        }
+                    }
+                }
+                
+                $bankBalances[$bankAccountIdentifier] = $openingBalance;
+            }
+
+            // Transform to transaction report format
+            $transactionReport = [];
+            $runningBalances = $bankBalances;
+            
+            foreach ($groupedTransfers as $transfer) {
+                $fromBank = $transfer['from_bank'];
+                $toBank = $transfer['to_bank'];
+                $amount = (float)($transfer['amount'] ?? 0);
+                
+                if (isset($runningBalances[$fromBank])) {
+                    $runningBalances[$fromBank] -= $amount;
+                }
+                if (isset($runningBalances[$toBank])) {
+                    $runningBalances[$toBank] += $amount;
+                }
+                
+                $transactionReport[] = [
+                    'date' => date('d M Y, h:i A', strtotime($transfer['created_at'])),
+                    'transaction_no' => $transfer['transaction_no'],
+                    'bank_account' => $fromBank,
+                    'type' => 'Debit',
+                    'debit' => number_format($amount, 2),
+                    'credit' => '0.00',
+                    'balance' => number_format($runningBalances[$fromBank] ?? 0, 2),
+                    'remark' => 'Transfer to ' . $toBank . ($transfer['remark'] ? ' - ' . $transfer['remark'] : ''),
+                ];
+                
+                $transactionReport[] = [
+                    'date' => date('d M Y, h:i A', strtotime($transfer['created_at'])),
+                    'transaction_no' => $transfer['transaction_no'],
+                    'bank_account' => $toBank,
+                    'type' => 'Credit',
+                    'debit' => '0.00',
+                    'credit' => number_format($amount, 2),
+                    'balance' => number_format($runningBalances[$toBank] ?? 0, 2),
+                    'remark' => 'Transfer from ' . $fromBank . ($transfer['remark'] ? ' - ' . $transfer['remark'] : ''),
+                ];
+            }
+
+            $export = new class($transactionReport) implements \Maatwebsite\Excel\Concerns\FromArray, \Maatwebsite\Excel\Concerns\WithHeadings {
+                protected $data;
+                
+                public function __construct($data)
+                {
+                    $this->data = $data;
+                }
+                
+                public function array(): array
+                {
+                    return $this->data;
+                }
+                
+                public function headings(): array
+                {
+                    return [
+                        'Date',
+                        'Transaction No.',
+                        'Bank Account',
+                        'Type',
+                        'Debit',
+                        'Credit',
+                        'Balance',
+                        'Remark',
+                    ];
+                }
+            };
+
+            $filename = 'bank_transfers_' . date('Y-m-d');
+            if ($dateFrom || $dateTo) {
+                $filename .= '_' . ($dateFrom ?: 'all') . '_to_' . ($dateTo ?: 'all');
+            } elseif ($monthFilter) {
+                $filename .= '_' . $monthFilter;
+            }
+            
+            return \Maatwebsite\Excel\Facades\Excel::download($export, $filename . '.xlsx');
+        } catch (\Exception $e) {
+            \Log::error('Error exporting bank transfers: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error exporting report: ' . $e->getMessage());
+        }
     }
 
     public function viewBankTransfer($id)

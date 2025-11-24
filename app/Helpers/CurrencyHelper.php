@@ -3,6 +3,8 @@
 namespace App\Helpers;
 
 use App\Models\Currency;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class CurrencyHelper
 {
@@ -11,9 +13,19 @@ class CurrencyHelper
      */
     public static function getDefault()
     {
-        return Currency::where('is_default', true)
-            ->where('status', 'Active')
-            ->first() ?? Currency::where('status', 'Active')->first();
+        try {
+            // Check if database connection is available
+            DB::connection()->getPdo();
+            
+            return Currency::where('is_default', true)
+                ->where('status', 'Active')
+                ->first() ?? Currency::where('status', 'Active')->first();
+        } catch (\Exception $e) {
+            // Return null if database connection fails (e.g., wrong credentials)
+            // This prevents the app from crashing when database is not configured
+            Log::warning('CurrencyHelper: Database connection failed - ' . $e->getMessage());
+            return null;
+        }
     }
 
     /**

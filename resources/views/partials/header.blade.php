@@ -12,7 +12,7 @@
                     @if($settings->logo && Storage::disk('public')->exists($settings->logo))
                         <img src="{{ Storage::url($settings->logo) }}" alt="Logo" class="h-8 w-auto">
                     @else
-                        <span class="text-xl font-extrabold" style="color: #1e3a8a;">Haxo<span style="color: {{ $settings->primary_color ?? '#FF750F' }};">Shipping</span></span>
+                        <span class="text-xl font-extrabold" style="color: #1e3a8a;">{{ $settings->site_name ?? 'Haxo Shipping' }}</span>
                     @endif
                 </a>
                 

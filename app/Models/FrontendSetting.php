@@ -12,6 +12,9 @@ class FrontendSetting extends Model
     use HasFactory;
 
     protected $fillable = [
+        'site_name',
+        'site_email',
+        'site_description',
         'logo',
         'banner',
         'primary_color',

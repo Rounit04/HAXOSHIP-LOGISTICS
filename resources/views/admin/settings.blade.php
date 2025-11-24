@@ -192,7 +192,8 @@
                     </h3>
                 </div>
                 <div class="settings-section-body">
-                    <form class="space-y-6">
+                    <form id="generalSettingsForm" method="POST" action="{{ route('admin.settings.update-general') }}" class="space-y-6">
+                        @csrf
                         <div class="form-group">
                             <label class="form-label">
                                 <svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -200,7 +201,7 @@
                                 </svg>
                                 Site Name
                             </label>
-                            <input type="text" value="{{ config('app.name') }}" class="form-input" placeholder="Enter site name">
+                            <input type="text" name="site_name" id="site_name" value="{{ $frontendSettings->site_name ?? config('app.name') }}" class="form-input" placeholder="Enter site name">
                         </div>
 
                         <div class="form-group">
@@ -210,7 +211,7 @@
                                 </svg>
                                 Site Email
                             </label>
-                            <input type="email" value="admin@haxoshipping.com" class="form-input" placeholder="Enter site email">
+                            <input type="email" name="site_email" id="site_email" value="{{ $frontendSettings->site_email ?? 'admin@haxoshipping.com' }}" class="form-input" placeholder="Enter site email">
                         </div>
 
                         <div class="form-group">
@@ -220,10 +221,10 @@
                                 </svg>
                                 Site Description
                             </label>
-                            <textarea rows="4" class="form-textarea resize-none" placeholder="Enter site description"></textarea>
+                            <textarea name="site_description" id="site_description" rows="4" class="form-textarea resize-none" placeholder="Enter site description">{{ $frontendSettings->site_description ?? '' }}</textarea>
                         </div>
 
-                        <button type="submit" class="admin-btn-primary px-6 py-3 text-sm font-semibold">
+                        <button type="submit" id="saveGeneralSettingsBtn" class="admin-btn-primary px-6 py-3 text-sm font-semibold">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
@@ -621,6 +622,130 @@
             </div>
         </div>
     </div>
+
+    <!-- Success Popup -->
+    <div id="success-popup" class="fixed top-4 right-4 z-50 bg-white rounded-lg shadow-2xl border-2 border-green-200 p-4 flex items-center gap-3 min-w-[320px] max-w-md hidden" style="animation: slideInRight 0.3s ease-out;">
+        <div class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+            <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+        </div>
+        <div class="flex-1">
+            <p id="success-message" class="text-green-700 font-semibold text-sm"></p>
+        </div>
+        <button onclick="closePopup()" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+        </button>
+    </div>
+
+    <style>
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .success-popup.closing {
+            animation: slideOutRight 0.3s ease-out forwards;
+        }
+        @keyframes slideOutRight {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+    </style>
+
+    <script>
+        // Handle general settings form submission
+        document.getElementById('generalSettingsForm')?.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const form = this;
+            const submitBtn = document.getElementById('saveGeneralSettingsBtn');
+            const originalButtonText = submitBtn.innerHTML;
+            
+            // Disable button and show loading
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<svg class="animate-spin h-4 w-4 text-white inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Saving...';
+            
+            const formData = new FormData(form);
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || form.querySelector('input[name="_token"]')?.value;
+            
+            fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const siteName = data.site_name || document.getElementById('site_name').value || 'Site';
+                    showSuccessPopup(data.message || `General settings updated successfully! Site name: ${siteName}`);
+                    
+                    // Update page title if site name changed
+                    if (data.site_name) {
+                        document.title = data.site_name + ' - Admin Panel';
+                    }
+                } else {
+                    alert(data.message || 'Failed to update settings. Please try again.');
+                }
+                
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalButtonText;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while updating settings. Please try again.');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalButtonText;
+            });
+        });
+
+        // Show success popup
+        function showSuccessPopup(message) {
+            const popup = document.getElementById('success-popup');
+            const messageElement = document.getElementById('success-message');
+            
+            if (popup && messageElement) {
+                messageElement.textContent = message;
+                popup.classList.remove('hidden');
+                popup.style.display = 'flex';
+                
+                // Auto-close after 5 seconds
+                setTimeout(() => {
+                    closePopup();
+                }, 5000);
+            }
+        }
+
+        // Close popup
+        function closePopup() {
+            const popup = document.getElementById('success-popup');
+            if (popup) {
+                popup.classList.add('closing');
+                setTimeout(() => {
+                    popup.style.display = 'none';
+                    popup.classList.add('hidden');
+                    popup.classList.remove('closing');
+                }, 300);
+            }
+        }
+    </script>
 @endsection
 
 

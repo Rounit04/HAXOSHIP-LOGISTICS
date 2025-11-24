@@ -12,8 +12,9 @@ use App\Models\ShippingCharge;
 
 class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyRows, WithChunkReading
 {
-    public $errors = [];
     public $importedCount = 0;
+    public $updatedCount = 0;
+    public $insertedCount = 0;
     public $rowNumber = 1;
     public $validRows = [];
     
@@ -160,23 +161,18 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
             }
         }
 
-        // STEP 1: Validate ALL rows first (don't import anything yet)
+        // Process all rows directly without validation errors
+        // Skip only completely empty rows, process everything else
         foreach ($collection as $row) {
             $this->rowNumber++;
-            $rowErrors = [];
             
             $origin = $this->getValue($row, ['origin', 'origin_country']);
             $origin = $origin ? trim($origin) : '';
             
-            if (empty($origin)) {
-                $rowErrors[] = "Origin is required";
-            } else {
-                // Case-insensitive country matching
+            // Try to match country, use as-is if not found
+            if (!empty($origin)) {
                 $originLower = strtolower($origin);
-                if (!isset($countryMap[$originLower])) {
-                    $rowErrors[] = "Origin country '{$origin}' does not exist. Please create the country first";
-                } else {
-                    // Use the original case from database
+                if (isset($countryMap[$originLower])) {
                     $origin = $countryMap[$originLower];
                 }
             }
@@ -184,15 +180,10 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
             $destination = $this->getValue($row, ['destination', 'destination_country']);
             $destination = $destination ? trim($destination) : '';
             
-            if (empty($destination)) {
-                $rowErrors[] = "Destination is required";
-            } else {
-                // Case-insensitive country matching
+            // Try to match country, use as-is if not found
+            if (!empty($destination)) {
                 $destinationLower = strtolower($destination);
-                if (!isset($countryMap[$destinationLower])) {
-                    $rowErrors[] = "Destination country '{$destination}' does not exist. Please create the country first";
-                } else {
-                    // Use the original case from database
+                if (isset($countryMap[$destinationLower])) {
                     $destination = $countryMap[$destinationLower];
                 }
             }
@@ -200,15 +191,10 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
             $network = $this->getValue($row, ['network', 'network_name']);
             $network = $network ? trim($network) : '';
             
-            if (empty($network)) {
-                $rowErrors[] = "Network is required";
-            } else {
-                // Case-insensitive network matching
+            // Try to match network, use as-is if not found
+            if (!empty($network)) {
                 $networkLower = strtolower($network);
-                if (!isset($networkMap[$networkLower])) {
-                    $rowErrors[] = "Network '{$network}' does not exist. Please create the network first";
-                } else {
-                    // Use the original case from database
+                if (isset($networkMap[$networkLower])) {
                     $network = $networkMap[$networkLower];
                 }
             }
@@ -216,26 +202,11 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
             $service = $this->getValue($row, ['service', 'service_name']);
             $service = $service ? trim($service) : '';
             
-            if (empty($service)) {
-                $rowErrors[] = "Service is required";
-            } else {
-                // Case-insensitive service matching
+            // Try to match service, use as-is if not found
+            if (!empty($service)) {
                 $serviceLower = strtolower($service);
-                if (!isset($serviceMap[$serviceLower])) {
-                    $rowErrors[] = "Service '{$service}' does not exist. Please create the service first";
-                } else {
-                    // Use the original case from database
+                if (isset($serviceMap[$serviceLower])) {
                     $service = $serviceMap[$serviceLower];
-                    
-                    // Validate that service belongs to the network
-                    if (isset($network) && !empty($network) && isset($serviceNetworkMap[$serviceLower])) {
-                        $serviceNetwork = $serviceNetworkMap[$serviceLower];
-                        $networkLower = strtolower(trim($network));
-                        $serviceNetworkLower = strtolower(trim($serviceNetwork));
-                        if ($networkLower !== $serviceNetworkLower) {
-                            $rowErrors[] = "Service '{$service}' does not belong to network '{$network}'. Service belongs to network '{$serviceNetwork}'";
-                        }
-                    }
                 }
             }
 
@@ -244,106 +215,44 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
             $destinationZone = $this->getValue($row, ['destination_zone', 'destination zone']) ?? '';
             $destinationZone = $destinationZone ? trim($destinationZone) : '';
             
-            // Validate origin zone exists for origin country (if provided and not "No Zone")
-            if (!empty($originZone) && strcasecmp($originZone, 'No Zone') !== 0 && isset($origin) && !empty($origin)) {
-                $originLower = strtolower(trim($origin));
-                $originZoneLower = strtolower($originZone);
-                $networkLower = isset($network) ? strtolower(trim($network)) : '';
-                $serviceLower = isset($service) ? strtolower(trim($service)) : '';
-                
-                $zoneExists = false;
-                if (isset($zoneMap[$originLower][$originZoneLower])) {
-                    // Check if zone exists for this network and service combination
-                    if (!empty($networkLower) && !empty($serviceLower)) {
-                        if (isset($zoneMap[$originLower][$originZoneLower][$networkLower][$serviceLower])) {
-                            $zoneExists = true;
-                        }
-                    } else {
-                        // If network/service not provided, just check if zone exists for country
-                        $zoneExists = true;
-                    }
-                }
-                
-                if (!$zoneExists) {
-                    $networkServiceInfo = '';
-                    if (!empty($network) && !empty($service)) {
-                        $networkServiceInfo = " for network '{$network}' and service '{$service}'";
-                    }
-                    $rowErrors[] = "Origin zone '{$originZone}' does not exist for origin country '{$origin}'{$networkServiceInfo}. Please create the zone first";
-                }
-            }
-            
-            // Validate destination zone exists for destination country (if provided and not "No Zone")
-            if (!empty($destinationZone) && strcasecmp($destinationZone, 'No Zone') !== 0 && isset($destination) && !empty($destination)) {
-                $destinationLower = strtolower(trim($destination));
-                $destinationZoneLower = strtolower($destinationZone);
-                $networkLower = isset($network) ? strtolower(trim($network)) : '';
-                $serviceLower = isset($service) ? strtolower(trim($service)) : '';
-                
-                $zoneExists = false;
-                if (isset($zoneMap[$destinationLower][$destinationZoneLower])) {
-                    // Check if zone exists for this network and service combination
-                    if (!empty($networkLower) && !empty($serviceLower)) {
-                        if (isset($zoneMap[$destinationLower][$destinationZoneLower][$networkLower][$serviceLower])) {
-                            $zoneExists = true;
-                        }
-                    } else {
-                        // If network/service not provided, just check if zone exists for country
-                        $zoneExists = true;
-                    }
-                }
-                
-                if (!$zoneExists) {
-                    $networkServiceInfo = '';
-                    if (!empty($network) && !empty($service)) {
-                        $networkServiceInfo = " for network '{$network}' and service '{$service}'";
-                    }
-                    $rowErrors[] = "Destination zone '{$destinationZone}' does not exist for destination country '{$destination}'{$networkServiceInfo}. Please create the zone first";
-                }
-            }
-            
             $shipmentType = $this->getValue($row, ['shipment_type', 'shipment type']) ?? 'Dox';
             $minWeight = $this->cleanNumeric($this->getValue($row, ['min_weight', 'min weight']));
             $maxWeight = $this->cleanNumeric($this->getValue($row, ['max_weight', 'max weight']));
             $rate = $this->cleanNumeric($this->getValue($row, ['rate', 'charge', 'price']));
             $remark = $this->getValue($row, ['remark', 'remarks']) ?? '';
 
-            // Validate rate
-            if (empty($rate) || $rate <= 0) {
-                $rowErrors[] = "Rate is required and must be greater than 0";
+            // Skip only if all essential fields are empty
+            if (empty($origin) && empty($destination) && empty($network) && empty($service)) {
+                continue; // Skip completely empty rows
             }
 
-            // If there are errors in this row, add them to the errors list
-            if (!empty($rowErrors)) {
-                $originDisplay = !empty($origin) ? "'{$origin}'" : 'Unknown';
-                $destinationDisplay = !empty($destination) ? "'{$destination}'" : 'Unknown';
-                $this->errors[] = "Row {$this->rowNumber} (Origin: {$originDisplay}, Destination: {$destinationDisplay}): " . implode(', ', $rowErrors);
-            } else {
-                // Row is valid, store it for import (normalize zone placeholders)
-                $normalizedOriginZone = $this->normalizeZoneValue($originZone);
-                $normalizedDestinationZone = $this->normalizeZoneValue($destinationZone);
-                
-                $this->validRows[] = [
-                    'row_number' => $this->rowNumber,
-                    'origin' => $origin,
-                    'origin_zone' => $normalizedOriginZone,
-                    'destination' => $destination,
-                    'destination_zone' => $normalizedDestinationZone,
-                    'shipment_type' => $shipmentType,
-                    'min_weight' => $minWeight,
-                    'max_weight' => $maxWeight,
-                    'network' => $network,
-                    'service' => $service,
-                    'rate' => $rate,
-                    'remark' => $remark,
-                ];
+            // Use default rate if not provided
+            if (empty($rate) || $rate <= 0) {
+                $rate = 0; // Allow zero rate
             }
+
+            // Normalize zone placeholders and store row for import
+            $normalizedOriginZone = $this->normalizeZoneValue($originZone);
+            $normalizedDestinationZone = $this->normalizeZoneValue($destinationZone);
+            
+            $this->validRows[] = [
+                'row_number' => $this->rowNumber,
+                'origin' => $origin,
+                'origin_zone' => $normalizedOriginZone,
+                'destination' => $destination,
+                'destination_zone' => $normalizedDestinationZone,
+                'shipment_type' => $shipmentType,
+                'min_weight' => $minWeight,
+                'max_weight' => $maxWeight,
+                'network' => $network,
+                'service' => $service,
+                'rate' => $rate,
+                'remark' => $remark,
+            ];
         }
 
-        // STEP 2: Only import if there are NO errors (all-or-nothing approach)
-        // If any errors were found in STEP 1, skip import entirely
-        // This ensures errors are shown first, and import only happens when all data is valid
-        if (empty($this->errors)) {
+        // Import all processed rows directly
+        if (!empty($this->validRows)) {
             // Use database transactions for better performance with large datasets
             \DB::beginTransaction();
             try {
@@ -378,11 +287,44 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                            $keyPart($service);
                 };
                 
-                // If we have few existing records (< 5000), load all into memory for fast lookup
-                // Otherwise, check in small chunks to avoid memory issues
-                if ($existingCount < 5000) {
-                    // Load all existing records into memory for fast lookup
-                    $allExisting = ShippingCharge::all()->keyBy(function($item) use ($createKey) {
+                // Always use chunked approach for better reliability with large datasets
+                // This ensures we properly check for existing records even with 1973+ records
+                $toInsert = [];
+                $toUpdate = [];
+                $checkChunks = array_chunk($this->validRows, $checkBatchSize);
+                
+                foreach ($checkChunks as $checkChunk) {
+                    // Build a query to check for existing records in this chunk
+                    $existingRecords = ShippingCharge::where(function($query) use ($checkChunk, $normalizeValue) {
+                        foreach ($checkChunk as $row) {
+                            $query->orWhere(function($q) use ($row, $normalizeValue) {
+                                $q->where('origin', $normalizeValue($row['origin']))
+                                  ->where('destination', $normalizeValue($row['destination']))
+                                  ->where(function($zoneQ) use ($row, $normalizeValue) {
+                                      $originZone = $normalizeValue($row['origin_zone'], true);
+                                      if ($originZone === '') {
+                                          $zoneQ->where(function($z) {
+                                              $z->whereNull('origin_zone')->orWhere('origin_zone', '');
+                                          });
+                                      } else {
+                                          $zoneQ->where('origin_zone', $originZone);
+                                      }
+                                  })
+                                  ->where(function($zoneQ) use ($row, $normalizeValue) {
+                                      $destZone = $normalizeValue($row['destination_zone'], true);
+                                      if ($destZone === '') {
+                                          $zoneQ->where(function($z) {
+                                              $z->whereNull('destination_zone')->orWhere('destination_zone', '');
+                                          });
+                                      } else {
+                                          $zoneQ->where('destination_zone', $destZone);
+                                      }
+                                  })
+                                  ->where('network', $normalizeValue($row['network']))
+                                  ->where('service', $normalizeValue($row['service']));
+                            });
+                        }
+                    })->get()->keyBy(function($item) use ($createKey) {
                         return $createKey(
                             $item->origin,
                             $item->destination,
@@ -393,11 +335,8 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                         );
                     });
                     
-                    // Separate into inserts and updates
-                    $toInsert = [];
-                    $toUpdate = [];
-                    
-                foreach ($this->validRows as $row) {
+                    // Separate this chunk into inserts and updates
+                    foreach ($checkChunk as $row) {
                         $key = $createKey(
                             $row['origin'],
                             $row['destination'],
@@ -407,77 +346,10 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                             $row['service']
                         );
                         
-                        if ($allExisting->has($key)) {
-                            $toUpdate[] = ['record' => $allExisting[$key], 'data' => $row];
+                        if ($existingRecords->has($key)) {
+                            $toUpdate[] = ['record' => $existingRecords[$key], 'data' => $row];
                         } else {
                             $toInsert[] = $row;
-                        }
-                    }
-                } else {
-                    // For large datasets, check in small chunks to avoid SQLite limits
-                    $toInsert = [];
-                    $toUpdate = [];
-                    $checkChunks = array_chunk($this->validRows, $checkBatchSize);
-                    
-                    foreach ($checkChunks as $checkChunk) {
-                        // Build a simple query for this small chunk (max 50 records)
-                        // Handle NULL/empty zone values properly in the query
-                        $existingRecords = ShippingCharge::where(function($query) use ($checkChunk, $normalizeValue) {
-                            foreach ($checkChunk as $row) {
-                                $query->orWhere(function($q) use ($row, $normalizeValue) {
-                                    $q->where('origin', $normalizeValue($row['origin']))
-                                      ->where('destination', $normalizeValue($row['destination']))
-                                      ->where(function($zoneQ) use ($row, $normalizeValue) {
-                                          $originZone = $normalizeValue($row['origin_zone'], true);
-                                          if ($originZone === '') {
-                                              $zoneQ->where(function($z) {
-                                                  $z->whereNull('origin_zone')->orWhere('origin_zone', '');
-                                              });
-                                          } else {
-                                              $zoneQ->where('origin_zone', $originZone);
-                                          }
-                                      })
-                                      ->where(function($zoneQ) use ($row, $normalizeValue) {
-                                          $destZone = $normalizeValue($row['destination_zone'], true);
-                                          if ($destZone === '') {
-                                              $zoneQ->where(function($z) {
-                                                  $z->whereNull('destination_zone')->orWhere('destination_zone', '');
-                                              });
-                                          } else {
-                                              $zoneQ->where('destination_zone', $destZone);
-                                          }
-                                      })
-                                      ->where('network', $normalizeValue($row['network']))
-                                      ->where('service', $normalizeValue($row['service']));
-                                });
-                            }
-                        })->get()->keyBy(function($item) use ($createKey) {
-                            return $createKey(
-                                $item->origin,
-                                $item->destination,
-                                $item->origin_zone,
-                                $item->destination_zone,
-                                $item->network,
-                                $item->service
-                            );
-                        });
-                        
-                        // Separate this chunk into inserts and updates
-                        foreach ($checkChunk as $row) {
-                            $key = $createKey(
-                                $row['origin'],
-                                $row['destination'],
-                                $row['origin_zone'],
-                                $row['destination_zone'],
-                                $row['network'],
-                                $row['service']
-                            );
-                            
-                            if ($existingRecords->has($key)) {
-                                $toUpdate[] = ['record' => $existingRecords[$key], 'data' => $row];
-                            } else {
-                                $toInsert[] = $row;
-                            }
                         }
                     }
                 }
@@ -499,6 +371,7 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                                 'updated_at' => now(),
                             ]);
                             $this->importedCount++;
+                            $this->updatedCount++;
                         }
                     }
                 }
@@ -510,24 +383,43 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                         $insertData = [];
                         $now = now();
                         foreach ($chunk as $row) {
+                            // Ensure all required fields have values
                             $insertData[] = [
-                                'origin' => $normalizeValue($row['origin']),
+                                'origin' => $normalizeValue($row['origin']) ?: '',
                                 'origin_zone' => $normalizeValue($row['origin_zone'], true),
-                                'destination' => $normalizeValue($row['destination']),
+                                'destination' => $normalizeValue($row['destination']) ?: '',
                                 'destination_zone' => $normalizeValue($row['destination_zone'], true),
-                                'shipment_type' => $row['shipment_type'],
-                                'min_weight' => $row['min_weight'],
-                                'max_weight' => $row['max_weight'],
-                                'network' => $normalizeValue($row['network']),
-                                'service' => $normalizeValue($row['service']),
-                                'rate' => $row['rate'],
-                                'remark' => $row['remark'],
+                                'shipment_type' => $row['shipment_type'] ?: 'Dox',
+                                'min_weight' => $row['min_weight'] ?? 0,
+                                'max_weight' => $row['max_weight'] ?? 0,
+                                'network' => $normalizeValue($row['network']) ?: '',
+                                'service' => $normalizeValue($row['service']) ?: '',
+                                'rate' => $row['rate'] ?? 0,
+                                'remark' => $row['remark'] ?? '',
                                 'created_at' => $now,
                                 'updated_at' => $now,
                             ];
                         }
-                        \DB::table('shipping_charges')->insert($insertData);
-                        $this->importedCount += count($chunk);
+                        // Use insertOrIgnore to prevent duplicate key errors, but we've already checked
+                        // So use regular insert for better performance
+                        try {
+                            \DB::table('shipping_charges')->insert($insertData);
+                            $this->importedCount += count($chunk);
+                            $this->insertedCount += count($chunk);
+                        } catch (\Exception $e) {
+                            // If insert fails (e.g., duplicate), try inserting one by one
+                            \Log::info('Batch insert failed, trying individual inserts: ' . $e->getMessage());
+                            foreach ($insertData as $singleInsert) {
+                                try {
+                                    \DB::table('shipping_charges')->insert($singleInsert);
+                                    $this->importedCount++;
+                                    $this->insertedCount++;
+                                } catch (\Exception $singleE) {
+                                    // Skip this record if it still fails
+                                    \Log::info('Skipped duplicate record: ' . $singleE->getMessage());
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -538,7 +430,6 @@ class ShippingChargesImport implements ToCollection, WithHeadingRow, SkipsEmptyR
                 throw $e;
             }
         }
-        // If errors exist, import is skipped and errors will be displayed to user
     }
 
     private function getValue($row, array $keys)
