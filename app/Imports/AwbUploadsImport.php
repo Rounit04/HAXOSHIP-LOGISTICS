@@ -24,6 +24,26 @@ class AwbUploadsImport implements ToModel, WithHeadingRow, WithStartRow, SkipsEm
     {
         return 2;
     }
+
+    /**
+     * Validation rules for the import
+     * 
+     * @return array
+     */
+    public function rules(): array
+    {
+        return [
+            // Basic validation rules - detailed validation is done in model() method
+            'awb' => 'nullable',
+            'awb_no' => 'nullable',
+            'networknam' => 'nullable',
+            'network_name' => 'nullable',
+            'servicename' => 'nullable',
+            'service_name' => 'nullable',
+            'origin' => 'nullable',
+            'destination' => 'nullable',
+        ];
+    }
     /**
      * @param array $row
      *
